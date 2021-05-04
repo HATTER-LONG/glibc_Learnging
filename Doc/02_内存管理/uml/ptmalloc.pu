@@ -1,0 +1,16 @@
+@startuml ptmalloc 第一次调用
+malloc -> __libc_malloc
+__libc_malloc ->  malloc_hook_ini: 即 __malloc_hook 的默认
+malloc_hook_ini -> ptmalloc_init: init 前会将 __malloc_hook 置空
+malloc_hook_ini -> __libc_malloc: 已经将 hook 置空，再重新调用
+__libc_malloc -> checked_request2size: 计算 chunk 空间大小
+__libc_malloc -> arena_get: 获取到分配区指针
+__libc_malloc -> _int_malloc: ptmalloc 具体实现
+@enduml
+
+@startuml 第二次调用
+malloc -> __libc_malloc
+__libc_malloc -> checked_request2size: 计算 chunk 空间大小
+__libc_malloc -> arena_get: 获取到分配区指针
+__libc_malloc -> _int_malloc: ptmalloc 具体实现
+@enduml
