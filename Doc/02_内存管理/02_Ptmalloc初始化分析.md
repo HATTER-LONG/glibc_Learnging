@@ -376,10 +376,7 @@ ptmalloc 的空闲 chunk 都是通过在 malloc_state 上的 bins 数组来管�
 
 - `Last remainder chunk`：Last remainder chunk 是另外一种特殊的 chunk，就像 top chunk 和 mmaped chunk 一样，不会在任何 bins 中找到这种 chunk。当需要分配一个 small chunk, 但在 small bins 中找不到合适的 chunk，如果 last remainder chunk 的大小大于所需要的 small chunk 大小，last remainder chunk 被分裂成两个 chunk，其中一个 chunk 返回给用户，另一个 chunk 变成新的 last remainder chunk。
 
-
 ## 内存管理数据结构之 chunk
-
-
 
 ```c
 /*

@@ -13,7 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_definitions(-Wall -pedantic)
 
 if(CMAKE_BUILD_TYPE MATCHES "Debug" OR CMAKE_BUILD_TYPE MATCHES "RelWithDebInfo")
-    add_definitions(-fno-limit-debug-info)
+    add_definitions(-fno-limit-debug-info -O0 -Wall -g2)
 endif()
 
 find_package(Threads)
