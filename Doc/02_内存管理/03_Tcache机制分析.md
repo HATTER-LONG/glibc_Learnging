@@ -356,3 +356,5 @@ tcache_get (size_t tc_idx)
   - 因为在申请时不需要考虑 pre_size，因为每个 chunk 都是可以复用下一个 chunk 的头 pre_size 内存。而 chunk2mem 偏移则是考虑当前 chunk 结构。
 - 疑问：tcache 链表中 chunk 节点是怎么来的？
   - 这个问题简单解释就是 free 时加入的，细节请关注后续 free 解析文档。
+
+TODO: Tcache uml 流程图。
