@@ -7,6 +7,8 @@
     - [Tcache 之计算索引](#tcache-之计算索引)
     - [Tcache 之初始化](#tcache-之初始化)
     - [Tcache 之参数限制](#tcache-之参数限制)
+    - [Tcache 之获取与存入](#tcache-之获取与存入)
+  - [总结](#总结)
 
 ## Tcache 机制
 
@@ -108,7 +110,7 @@ checked_request2size (size_t req, size_t *sz) __nonnull (1)
 
 注意 MIN_CHUNK_SIZE 计算方式是 `malloc_chunk` 结构体偏移到 fd_nextsize 成员的大小，这里涉及到 chunk 共享的知识点：
 
-> 当一个 chunk 为空闲时，至少要有 prev_size、size、fd 和 bk 四个参数，因此 MINSIZE 就代表了这四个参数需要占用的内存大小；而当一个 chunk 被使用时，prev_size 可能会被前一个 chunk 用来存储，fd 和 bk 也会被当作内存存储数据，因此当 chunk 被使用时，只剩下了 size 参数需要设置，request2size 中的 SIZE_SZ 就是 INTERNAL_SIZE_T 类型的大小，因此至少需要 req + SIZE_SZ 的内存大小。MALLOC_ALIGN_MASK 用来对齐，至此 request2size 就计算出了所需的 chunk 的大小。
+> 当一个 chunk 为空闲时，至少要有 prev_size、size、fd 和 bk 四个参数，因此 MINSIZE 就代表了这四个参数需要占用的内存大小；而当一个 chunk 被使用时，prev_size 可能会被前一个 chunk 用来存储，而当前 chunk 也可以使用下一个 chunk 的 prev_size，互相抵消;fd 和 bk 也会被当作内存存储数据，因此当 chunk 被使用时，只剩下了 size 参数需要设置，request2size 中的 SIZE_SZ 就是 INTERNAL_SIZE_T 类型的大小，因此至少需要 req + SIZE_SZ 的内存大小。MALLOC_ALIGN_MASK 用来对齐，至此 request2size 就计算出了所需的 chunk 的大小。
 
 - 以 64 位系统举例：
 
@@ -198,7 +200,7 @@ __libc_malloc (size_t bytes)
     arena_get (ar_ptr, bytes);
 
     // 分配 tcache_perthread_struct 内存
-    victim = _int_malloc (ar_ptr, bytes);
+    victim = _int_malloc (ar_ptr, bytes); // _int_malloc 接口便是 ptmalloc 分配内存的具体实现了，会在后边章节具体解析
     if (!victim && ar_ptr != NULL) //分配失败会进行重试
         {
         ar_ptr = arena_get_retry (ar_ptr, bytes);
@@ -303,3 +305,54 @@ static struct malloc_par mp_ = {
 
 同时也明确了 csize2tidx 查找的就是对应大小的 bins，然后查找其上以单链表形式组织的 chunk 结构内存。
 
+### Tcache 之获取与存入
+
+tcache 当通过条件判断后，确保对应链表存在节点后会通过 `tcache_get` 接口获取 chunk 中 user mem 内存。get 与 put 接口源码如下：
+
+```cpp
+struct malloc_chunk;
+typedef struct malloc_chunk* mchunkptr;
+
+#define chunk2mem(p)   ((void*)((char*)(p) + 2*SIZE_SZ))
+#define mem2chunk(mem) ((mchunkptr)((char*)(mem) - 2*SIZE_SZ))
+
+/* Caller must ensure that we know tc_idx is valid and there's room
+   for more chunks.  */
+static __always_inline void
+tcache_put (mchunkptr chunk, size_t tc_idx)
+{
+  tcache_entry *e = (tcache_entry *) chunk2mem (chunk);
+
+  /* Mark this chunk as "in the tcache" so the test in _int_free will
+     detect a double free.  */
+  e->key = tcache;
+
+  e->next = tcache->entries[tc_idx];
+  tcache->entries[tc_idx] = e;
+  ++(tcache->counts[tc_idx]);
+}
+
+/* Caller must ensure that we know tc_idx is valid and there's
+   available chunks to remove.  */
+static __always_inline void *
+tcache_get (size_t tc_idx)
+{
+  tcache_entry *e = tcache->entries[tc_idx];
+  tcache->entries[tc_idx] = e->next;
+  --(tcache->counts[tc_idx]);
+  e->key = NULL;
+  return (void *) e;
+}
+```
+
+- 先分析 get 接口，传入对应链表的标号，取出链表头部的内存节点，count 计数 -1，返回内存指针。
+- put 借口传入 chunk，通过 chunk2mem 计算出  chunk 中 user mem 地址指针，存入链表中。
+  
+## 总结
+
+至此，我们分析了 tcache 中管理 chunk 内存的方式，以及一些申请内存的细节。
+
+- 疑问：为什么 chunk2mem 中偏移量为 2×SIZE_SZ 与申请的内存容量之增加了 SIZE_SZ 对不上。
+  - 因为在申请时不需要考虑 pre_size，因为每个 chunk 都是可以复用下一个 chunk 的头 pre_size 内存。而 chunk2mem 偏移则是考虑当前 chunk 结构。
+- 疑问：tcache 链表中 chunk 节点是怎么来的？
+  - 这个问题简单解释就是 free 时加入的，细节请关注后续 free 解析文档。
