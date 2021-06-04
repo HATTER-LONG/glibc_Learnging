@@ -3,7 +3,8 @@
 - [Ptmalloc 内存申请](#ptmalloc-内存申请)
   - [内存申请](#内存申请)
     - [内存分配之单线程](#内存分配之单线程)
-    - [内存分配之 `_int_malloc`](#内存分配之-_int_malloc)
+  - [内存分配之 `_int_malloc`](#内存分配之-_int_malloc)
+    - [`_int_malloc` 之 `small bins`](#_int_malloc-之-small-bins)
 
 ## 内存申请
 
@@ -66,7 +67,7 @@ __libc_malloc (size_t bytes)
 
 > main_arena 主分配区在 Ptmalloc 初始化分析中介绍过，当进程中第一次调用 malloc 申请内存的线程会进行 ptmalloc 初始化，会构建一个主分配区。
 
-### 内存分配之 `_int_malloc`
+## 内存分配之 `_int_malloc`
 
 1. _int_malloc 入口部分代码，定义了一些局部变量：
 
@@ -312,3 +313,135 @@ __libc_malloc (size_t bytes)
         return global_max_fast;
         }
         ```
+
+### `_int_malloc` 之 `small bins`
+
+当 `fast bins` 未初始化或者不能满足申请的内存时，流程就会尝试使用 `small bins` 来完成内存申请。
+
+```cpp
+  /*
+     If a small request, check regular bin.  Since these "smallbins"
+     hold one size each, no searching within bins is necessary.
+     (For a large request, we need to wait until unsorted chunks are
+     processed to find best fit. But for small ones, fits are exact
+     anyway, so we can check now, which is faster.)
+   */
+
+  if (in_smallbin_range (nb))
+    {
+      idx = smallbin_index (nb);
+      bin = bin_at (av, idx);
+
+      if ((victim = last (bin)) != bin)
+        {
+          bck = victim->bk;
+      if (__glibc_unlikely (bck->fd != victim))
+        malloc_printerr ("malloc(): smallbin double linked list corrupted");
+          set_inuse_bit_at_offset (victim, nb);
+          bin->bk = bck;
+          bck->fd = bin;
+
+          if (av != &main_arena)
+        set_non_main_arena (victim);
+          check_malloced_chunk (av, victim, nb);
+#if USE_TCACHE
+      /* While we're here, if we see other chunks of the same size,
+         stash them in the tcache.  */
+      size_t tc_idx = csize2tidx (nb);
+      if (tcache && tc_idx < mp_.tcache_bins)
+        {
+          mchunkptr tc_victim;
+
+          /* While bin not empty and tcache not full, copy chunks over.  */
+          while (tcache->counts[tc_idx] < mp_.tcache_count
+             && (tc_victim = last (bin)) != bin)
+        {
+          if (tc_victim != 0)
+            {
+              bck = tc_victim->bk;
+              set_inuse_bit_at_offset (tc_victim, nb);
+              if (av != &main_arena)
+            set_non_main_arena (tc_victim);
+              bin->bk = bck;
+              bck->fd = bin;
+
+              tcache_put (tc_victim, tc_idx);
+                }
+        }
+#endif
+          void *p = chunk2mem (victim);
+          alloc_perturb (p, bytes);
+          return p;
+        }
+    }
+```
+
+[参考文章--glibc-malloc 源码分析](https://a1ex.online/2020/09/28/glibc-malloc%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/)
+
+1. 首先判断申请的内存大小是否符合 `small bins` 范围，然后使用 `smallbin_index` 寻找对应链表。 small bins 中每个 chunk 的大小与其所在的 bin 的 index 的关系为 `chunk_size = 2 * SIZE_SZ *index`：
+
+    ```cpp
+    /*
+    Indexing
+
+        Bins for sizes < 512 bytes contain chunks of all the same size, spaced
+        8 bytes apart. Larger bins are approximately logarithmically spaced:
+
+        64 bins of size       8
+        32 bins of size      64
+        16 bins of size     512
+        8 bins of size    4096
+        4 bins of size   32768
+        2 bins of size  262144
+        1 bin  of size what's left
+
+        There is actually a little bit of slop in the numbers in bin_index
+        for the sake of speed. This makes no difference elsewhere.
+
+        The bins top out around 1MB because we expect to service large
+        requests via mmap.
+
+        Bin 0 does not exist.  Bin 1 is the unordered list; if that would be
+        a valid chunk size the small bins are bumped up one.
+    */
+    //bins 总的数量
+    #define NBINS             128
+    //Small bin 大小
+    #define NSMALLBINS         64
+    #define SMALLBIN_WIDTH    MALLOC_ALIGNMENT
+    //是否需要对 small bin 的下标进行纠正
+    #define SMALLBIN_CORRECTION (MALLOC_ALIGNMENT > 2 * SIZE_SZ)
+    #define MIN_LARGE_SIZE    ((NSMALLBINS - SMALLBIN_CORRECTION) * SMALLBIN_WIDTH)
+
+    #define in_smallbin_range(sz)  \
+    ((unsigned long) (sz) < (unsigned long) MIN_LARGE_SIZE)
+    //根据 sz 得到 smallbin 的序号
+    #define smallbin_index(sz) \
+    ((SMALLBIN_WIDTH == 16 ? (((unsigned) (sz)) >> 4) : (((unsigned) (sz)) >> 3))\
+    + SMALLBIN_CORRECTION)
+
+    ```
+
+2. 使用 `bin_at` 得到 `small bin` 的链表 chunk 头地址，:
+
+    ```cpp
+    /* addressing -- note that bin_at(0) does not exist */
+    #define bin_at(m, i) \
+    (mbinptr) (((char *) &((m)->bins[((i) - 1) * 2]))     \
+                - offsetof (struct malloc_chunk, fd))
+
+    // 由于 分配区的 bins 管理是双向链表 fd 与 bk 进行管理
+    // 当拿到 fd 地址时需要减去对应偏移就是当前 chunk 的头部地址
+    struct malloc_chunk {
+
+    INTERNAL_SIZE_T      mchunk_prev_size;  /* Size of previous chunk (if free).  */
+    INTERNAL_SIZE_T      mchunk_size;       /* Size in bytes, including overhead. */
+
+    struct malloc_chunk* fd;         /* double links -- used only if free. */
+    struct malloc_chunk* bk;
+
+    /* Only used for large blocks: pointer to next larger size.  */
+    struct malloc_chunk* fd_nextsize; /* double links -- used only if free. */
+    struct malloc_chunk* bk_nextsize;
+    };
+    ```
