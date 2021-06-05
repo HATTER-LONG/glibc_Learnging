@@ -332,11 +332,13 @@ __libc_malloc (size_t bytes)
       idx = smallbin_index (nb);
       bin = bin_at (av, idx);
 
+      // 判断当前 chunk 不是此链表最后一个 chunk，并进行正确性链表检查
       if ((victim = last (bin)) != bin)
         {
           bck = victim->bk;
       if (__glibc_unlikely (bck->fd != victim))
         malloc_printerr ("malloc(): smallbin double linked list corrupted");
+
           set_inuse_bit_at_offset (victim, nb);
           bin->bk = bck;
           bck->fd = bin;
@@ -347,6 +349,7 @@ __libc_malloc (size_t bytes)
 #if USE_TCACHE
       /* While we're here, if we see other chunks of the same size,
          stash them in the tcache.  */
+      //类似 fastbins 一样，会将相同类型的 chunk 填充到 tcache 中
       size_t tc_idx = csize2tidx (nb);
       if (tcache && tc_idx < mp_.tcache_bins)
         {
@@ -368,11 +371,29 @@ __libc_malloc (size_t bytes)
               tcache_put (tc_victim, tc_idx);
                 }
         }
+        }
 #endif
           void *p = chunk2mem (victim);
           alloc_perturb (p, bytes);
           return p;
         }
+    }
+    /*
+     If this is a large request, consolidate fastbins before continuing.
+     While it might look excessive to kill all fastbins before
+     even seeing if there is space available, this avoids
+     fragmentation problems normally associated with fastbins.
+     Also, in practice, programs tend to have runs of either small or
+     large requests, but less often mixtures, so consolidation is not
+     invoked all that often in most programs. And the programs that
+     it is called frequently in otherwise tend to fragment.
+   */
+
+  else
+    {
+      idx = largebin_index (nb);
+      if (atomic_load_relaxed (&av->have_fastchunks))
+        malloc_consolidate (av);
     }
 ```
 
@@ -408,6 +429,7 @@ __libc_malloc (size_t bytes)
     #define NBINS             128
     //Small bin 大小
     #define NSMALLBINS         64
+    // 2*size_t
     #define SMALLBIN_WIDTH    MALLOC_ALIGNMENT
     //是否需要对 small bin 的下标进行纠正
     #define SMALLBIN_CORRECTION (MALLOC_ALIGNMENT > 2 * SIZE_SZ)
@@ -415,7 +437,8 @@ __libc_malloc (size_t bytes)
 
     #define in_smallbin_range(sz)  \
     ((unsigned long) (sz) < (unsigned long) MIN_LARGE_SIZE)
-    //根据 sz 得到 smallbin 的序号
+    //根据 sz 得到 smallbin 的序号，例如 sz = 32， 32>>4 = 2 + SMALLBIN_CORRECTION (0) = 2
+    // 对应 bins 数组，第 1 位是无序链表，小于 512 字节 的是 smalle bins，8、64、512、。。。。因此返回 下标 2（64） 
     #define smallbin_index(sz) \
     ((SMALLBIN_WIDTH == 16 ? (((unsigned) (sz)) >> 4) : (((unsigned) (sz)) >> 3))\
     + SMALLBIN_CORRECTION)
@@ -429,6 +452,14 @@ __libc_malloc (size_t bytes)
     #define bin_at(m, i) \
     (mbinptr) (((char *) &((m)->bins[((i) - 1) * 2]))     \
                 - offsetof (struct malloc_chunk, fd))
+
+    /* analog of ++bin */
+    #define next_bin(b)  ((mbinptr) ((char *) (b) + (sizeof (mchunkptr) << 1)))
+
+    /* Reminders about list directionality within bins */
+    #define first(b)     ((b)->fd)
+    #define last(b)      ((b)->bk)
+
 
     // 由于 分配区的 bins 管理是双向链表 fd 与 bk 进行管理
     // 当拿到 fd 地址时需要减去对应偏移就是当前 chunk 的头部地址
@@ -444,4 +475,73 @@ __libc_malloc (size_t bytes)
     struct malloc_chunk* fd_nextsize; /* double links -- used only if free. */
     struct malloc_chunk* bk_nextsize;
     };
+    ```
+
+3. 设置取出的 chunk 使用标志位，然后将其从链表中取出，非主分配区设置此 chunk 对应标志位：
+
+    ```cpp
+    set_inuse_bit_at_offset (victim, nb);
+    bin->bk = bck;
+    bck->fd = bin;
+    if (av != &main_arena)
+        set_non_main_arena (victim);
+    check_malloced_chunk (av, victim, nb);// debug模式使用
+    .................
+
+
+    #define set_inuse_bit_at_offset(p, s)     \
+        (((mchunkptr) (((char *) (p)) + (s)))->mchunk_size |= PREV_INUSE)
+
+    /* Check for chunk from main arena.  */
+    #define chunk_main_arena(p) (((p)->mchunk_size & NON_MAIN_ARENA) == 0)
+
+    /* Mark a chunk as not being on the main arena.  */
+    #define set_non_main_arena(p) ((p)->mchunk_size |= NON_MAIN_ARENA)
+
+    ```
+
+4. else 分支则表示当 small bins 无法满足必须使用 large bins 之前，先进行 fast bins 的合并工作：
+
+    ```cpp
+      idx = largebin_index (nb);
+      if (atomic_load_relaxed (&av->have_fastchunks))
+        malloc_consolidate (av);
+    
+    ........
+
+    #define largebin_index_32(sz)                                                \
+    (((((unsigned long) (sz)) >> 6) <= 38) ?  56 + (((unsigned long) (sz)) >> 6) :\
+    ((((unsigned long) (sz)) >> 9) <= 20) ?  91 + (((unsigned long) (sz)) >> 9) :\
+    ((((unsigned long) (sz)) >> 12) <= 10) ? 110 + (((unsigned long) (sz)) >> 12) :\
+    ((((unsigned long) (sz)) >> 15) <= 4) ? 119 + (((unsigned long) (sz)) >> 15) :\
+    ((((unsigned long) (sz)) >> 18) <= 2) ? 124 + (((unsigned long) (sz)) >> 18) :\
+    126)
+
+    #define largebin_index_32_big(sz)                                            \
+    (((((unsigned long) (sz)) >> 6) <= 45) ?  49 + (((unsigned long) (sz)) >> 6) :\
+    ((((unsigned long) (sz)) >> 9) <= 20) ?  91 + (((unsigned long) (sz)) >> 9) :\
+    ((((unsigned long) (sz)) >> 12) <= 10) ? 110 + (((unsigned long) (sz)) >> 12) :\
+    ((((unsigned long) (sz)) >> 15) <= 4) ? 119 + (((unsigned long) (sz)) >> 15) :\
+    ((((unsigned long) (sz)) >> 18) <= 2) ? 124 + (((unsigned long) (sz)) >> 18) :\
+    126)
+
+    // XXX It remains to be seen whether it is good to keep the widths of
+    // XXX the buckets the same or whether it should be scaled by a factor
+    // XXX of two as well.
+    #define largebin_index_64(sz)                                                \
+    (((((unsigned long) (sz)) >> 6) <= 48) ?  48 + (((unsigned long) (sz)) >> 6) :\
+    ((((unsigned long) (sz)) >> 9) <= 20) ?  91 + (((unsigned long) (sz)) >> 9) :\
+    ((((unsigned long) (sz)) >> 12) <= 10) ? 110 + (((unsigned long) (sz)) >> 12) :\
+    ((((unsigned long) (sz)) >> 15) <= 4) ? 119 + (((unsigned long) (sz)) >> 15) :\
+    ((((unsigned long) (sz)) >> 18) <= 2) ? 124 + (((unsigned long) (sz)) >> 18) :\
+    126)
+
+    #define largebin_index(sz) \
+    (SIZE_SZ == 8 ? largebin_index_64 (sz)                                     \
+    : MALLOC_ALIGNMENT == 16 ? largebin_index_32_big (sz)                     \
+    : largebin_index_32 (sz))
+
+    # define atomic_load_relaxed(mem) \
+    ({ __atomic_check_size_ls((mem));    \
+        __atomic_load_n ((mem), __ATOMIC_RELAXED); })
     ```
