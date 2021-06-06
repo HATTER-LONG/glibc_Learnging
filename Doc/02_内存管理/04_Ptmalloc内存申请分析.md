@@ -5,6 +5,7 @@
     - [内存分配之单线程](#内存分配之单线程)
   - [内存分配之 `_int_malloc`](#内存分配之-_int_malloc)
     - [`_int_malloc` 之 `small bins`](#_int_malloc-之-small-bins)
+    - [`_int_malloc` 之 `malloc_consolidate`](#_int_malloc-之-malloc_consolidate)
 
 ## 内存申请
 
@@ -371,7 +372,6 @@ __libc_malloc (size_t bytes)
               tcache_put (tc_victim, tc_idx);
                 }
         }
-        }
 #endif
           void *p = chunk2mem (victim);
           alloc_perturb (p, bytes);
@@ -438,7 +438,7 @@ __libc_malloc (size_t bytes)
     #define in_smallbin_range(sz)  \
     ((unsigned long) (sz) < (unsigned long) MIN_LARGE_SIZE)
     //根据 sz 得到 smallbin 的序号，例如 sz = 32， 32>>4 = 2 + SMALLBIN_CORRECTION (0) = 2
-    // 对应 bins 数组，第 1 位是无序链表，小于 512 字节 的是 smalle bins，8、64、512、。。。。因此返回 下标 2（64） 
+    // 对应 bins 数组，第 1 位是无序链表，小于 512 字节 的是 smalle bins，8、64、512、。因此返回 下标 2（64） 
     #define smallbin_index(sz) \
     ((SMALLBIN_WIDTH == 16 ? (((unsigned) (sz)) >> 4) : (((unsigned) (sz)) >> 3))\
     + SMALLBIN_CORRECTION)
@@ -459,7 +459,6 @@ __libc_malloc (size_t bytes)
     /* Reminders about list directionality within bins */
     #define first(b)     ((b)->fd)
     #define last(b)      ((b)->bk)
-
 
     // 由于 分配区的 bins 管理是双向链表 fd 与 bk 进行管理
     // 当拿到 fd 地址时需要减去对应偏移就是当前 chunk 的头部地址
@@ -485,9 +484,8 @@ __libc_malloc (size_t bytes)
     bck->fd = bin;
     if (av != &main_arena)
         set_non_main_arena (victim);
-    check_malloced_chunk (av, victim, nb);// debug模式使用
+    check_malloced_chunk (av, victim, nb);// debug 模式使用
     .................
-
 
     #define set_inuse_bit_at_offset(p, s)     \
         (((mchunkptr) (((char *) (p)) + (s)))->mchunk_size |= PREV_INUSE)
@@ -502,28 +500,18 @@ __libc_malloc (size_t bytes)
 
 4. else 分支则表示当 small bins 无法满足必须使用 large bins 之前，先进行 fast bins 的合并工作：
 
+    - [参考文章--浅析 largebin attack](https://xz.aliyun.com/t/5177)
+    - [参考文章--largebin 学习从源码到做题](https://xz.aliyun.com/t/6596)
+
+    - 大于 1024（512）字节的 chunk 称之为 large chunk，large bin 就是用于管理这些 large chunk 的。一共包括 63 个 bin，index 为 64~126，每个 bin 中的 chunk 的大小不一致，而是处于一定区间范围内。
+    - 例如分配 1024 字节内存，largebin_index_64：1024 >> 16 = 16 < 48 = 48 + 16 = 64。
+
     ```cpp
-      idx = largebin_index (nb);
-      if (atomic_load_relaxed (&av->have_fastchunks))
+      idx = largebin_index (nb); //获取申请内存所需的 largebin 的 下标
+      if (atomic_load_relaxed (&av->have_fastchunks)) // 原子获取分配区中是否有空闲的 fast chunks 接下来进行合并操作
         malloc_consolidate (av);
-    
+
     ........
-
-    #define largebin_index_32(sz)                                                \
-    (((((unsigned long) (sz)) >> 6) <= 38) ?  56 + (((unsigned long) (sz)) >> 6) :\
-    ((((unsigned long) (sz)) >> 9) <= 20) ?  91 + (((unsigned long) (sz)) >> 9) :\
-    ((((unsigned long) (sz)) >> 12) <= 10) ? 110 + (((unsigned long) (sz)) >> 12) :\
-    ((((unsigned long) (sz)) >> 15) <= 4) ? 119 + (((unsigned long) (sz)) >> 15) :\
-    ((((unsigned long) (sz)) >> 18) <= 2) ? 124 + (((unsigned long) (sz)) >> 18) :\
-    126)
-
-    #define largebin_index_32_big(sz)                                            \
-    (((((unsigned long) (sz)) >> 6) <= 45) ?  49 + (((unsigned long) (sz)) >> 6) :\
-    ((((unsigned long) (sz)) >> 9) <= 20) ?  91 + (((unsigned long) (sz)) >> 9) :\
-    ((((unsigned long) (sz)) >> 12) <= 10) ? 110 + (((unsigned long) (sz)) >> 12) :\
-    ((((unsigned long) (sz)) >> 15) <= 4) ? 119 + (((unsigned long) (sz)) >> 15) :\
-    ((((unsigned long) (sz)) >> 18) <= 2) ? 124 + (((unsigned long) (sz)) >> 18) :\
-    126)
 
     // XXX It remains to be seen whether it is good to keep the widths of
     // XXX the buckets the same or whether it should be scaled by a factor
@@ -545,3 +533,120 @@ __libc_malloc (size_t bytes)
     ({ __atomic_check_size_ls((mem));    \
         __atomic_load_n ((mem), __ATOMIC_RELAXED); })
     ```
+
+### `_int_malloc` 之 `malloc_consolidate`
+
+- [参考文章--堆漏洞挖掘中的 malloc_consolidate 与 FASTBIN_CONSOLIDATION_THRESHOLD](https://dongshao.blog.csdn.net/article/details/97627411)
+
+- consolidate 的目的对堆中的碎片 chunk 进行合并整理，减少堆中的碎片。主要将 fastbin 管理的所有 chunk 空闲的进行释放，将其添加到 usorted bin 上。
+
+```cpp
+/*
+  ------------------------- malloc_consolidate -------------------------
+
+  malloc_consolidate is a specialized version of free() that tears
+  down chunks held in fastbins.  Free itself cannot be used for this
+  purpose since, among other things, it might place chunks back onto
+  fastbins.  So, instead, we need to use a minor variant of the same
+  code.
+*/
+
+static void malloc_consolidate(mstate av) {
+  mfastbinptr *fb;          /* current fastbin being consolidated */
+  mfastbinptr *maxfb;       /* last fastbin (for loop control) */
+  mchunkptr p;              /* current chunk being consolidated */
+  mchunkptr nextp;          /* next chunk to consolidate */
+  mchunkptr unsorted_bin;   /* bin header */
+  mchunkptr first_unsorted; /* chunk to link to */
+
+  /* These have same use as in free() */
+  mchunkptr nextchunk;
+  INTERNAL_SIZE_T size;
+  INTERNAL_SIZE_T nextsize;
+  INTERNAL_SIZE_T prevsize;
+  int nextinuse;
+
+  atomic_store_relaxed(&av->have_fastchunks,
+                       false); //首先原子操作将分配区 have_fastchunks 置为 false
+
+  unsorted_bin =
+      unsorted_chunks(av); //取出 bin[1] 也就是 unsorted bins 的第一个 chunk
+
+  /*
+    Remove each chunk from fast bin and consolidate it, placing it
+    then in unsorted bin. Among other reasons for doing this,
+    placing in unsorted bin avoids needing to calculate actual bins
+    until malloc is sure that chunks aren't immediately going to be
+    reused anyway.
+  */
+  /*
+      从 fast bin 中删除每个块并合并它，然后将其放入 unsorted bin 中。
+      这样做的其他原因之一是，放入 unsorted bin 避免了需要计算实际 bin，
+      直到 malloc 确定无论如何都不会立即重用块。
+  */
+  maxfb = &fastbin(av, NFASTBINS - 1); // 取出 fastbin 中最后一个链表 chunk
+  fb = &fastbin(av, 0);                // fastbin 第一个链表的 chunk
+  do {
+    p = atomic_exchange_acq(fb, NULL); //原子性的 将 fb 置空并返回 fb 原来的值
+    if (p != 0) {
+      do {
+        {
+          unsigned int idx =
+              fastbin_index(chunksize(p)); // 通过 chunksize 重新获取 index
+          if ((&fastbin(av, idx)) != fb) // 并重新获取一次 chunk 判断链表布局是否正常
+            malloc_printerr("malloc_consolidate(): invalid chunk size");
+        }
+
+        check_inuse_chunk(av, p); // debug 模式使用
+        nextp = p->fd;
+
+        /* Slightly streamlined version of consolidation code in free() */
+        size = chunksize(p);                  // 获取当前 p chunk 的大小
+        nextchunk = chunk_at_offset(p, size); // 偏移获取下一个 chunk 头地址
+        nextsize = chunksize(nextchunk);
+
+        if (!prev_inuse(p)) {      // 如果前一块 chunk 没有使用，
+          prevsize = prev_size(p); // 则获取前一块 chunk 偏移
+          size += prevsize;
+          p = chunk_at_offset(
+              p, -((long)prevsize)); // 并将 p 向前推移到前一块 chunk 的首地址
+          if (__glibc_unlikely(chunksize(p) != prevsize))
+            malloc_printerr("corrupted size vs. prev_size in fastbins");
+          unlink_chunk(av, p); // 将这块空闲的 chunk 从对应的 bins 链表取出
+        }
+
+        if (nextchunk != av->top) { // 是否链表为空
+          nextinuse = inuse_bit_at_offset(nextchunk, nextsize); // 判断当前 nextchunk 是否 inuse
+
+          if (!nextinuse) {
+            size += nextsize;
+            unlink_chunk(av, nextchunk); // 如果没有使用，将当前 nextchunk 从链表中取出
+          } else
+            clear_inuse_bit_at_offset(nextchunk, 0); //如果还有在使用 则将当前 nextchunk 设置为未使用
+
+          first_unsorted = unsorted_bin->fd;
+          unsorted_bin->fd = p; // 将取出的 p chunk 放入 unsorted bin 链表上
+          first_unsorted->bk = p;
+
+          if (!in_smallbin_range(size)) {
+            p->fd_nextsize = NULL;  // large bins 需要考虑 这两个指针赋值
+            p->bk_nextsize = NULL;  // TODO: 后文介绍
+          }
+
+          set_head(p, size | PREV_INUSE); // 设置 p 的 chunk_size 包含 PREV_INUSE 标志
+          p->bk = unsorted_bin;
+          p->fd = first_unsorted;
+          set_foot(p, size); // 设置下一块 chunk 的 prev_size 大小
+        }
+
+        else {
+          size += nextsize;
+          set_head(p, size | PREV_INUSE);
+          av->top = p;
+        }
+
+      } while ((p = nextp) != 0); // 遍历链表所有节点
+    }
+  } while (fb++ != maxfb); // 便利所有链表
+}
+```

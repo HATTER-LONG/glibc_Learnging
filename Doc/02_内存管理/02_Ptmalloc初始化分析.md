@@ -378,6 +378,8 @@ ptmalloc 的空闲 chunk 都是通过在 malloc_state 上的 bins 数组来管�
 
 ## 内存管理数据结构之 chunk
 
+- [参考文章--glibc 内存管理源码分析](https://github.com/vislee/leevis.com/issues/132)
+
 ```c
 /*
   -----------------------  Chunk representations -----------------------
