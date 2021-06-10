@@ -6,16 +6,16 @@ project(GlibcDebug LANGUAGES CXX)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_VERBOSE_MAKEFILE OFF)
+set(CMAKE_VERBOSE_MAKEFILE ON)
 
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_definitions(-Wall -pedantic)
 
 if(CMAKE_BUILD_TYPE MATCHES "Debug" OR CMAKE_BUILD_TYPE MATCHES "RelWithDebInfo")
-    add_definitions(-fno-limit-debug-info -O0 -Wall -g2)
+    #dd_definitions(-fno-limit-debug-info -O0 -Wall -g2)
 endif()
-
+set(CMAKE_THREAD_LIBS_INIT "-lpthread")
 find_package(Threads)
 
 set(LOCAL_LINK_LIB pthread)
@@ -33,12 +33,11 @@ if(nlohmann_json_FOUND)
 else()
     include_directories(Lib/nlohmann)
 endif()
-
 ## 指定头文件、库查找路径
 include_directories(Include)
 link_directories(Lib)
-
 link_directories(/home/layton/Tools/glibc-debug/usr/lib)
+link_directories(/home/layton/Tools/glibc-debug/elf/)
 message(STATUS "LOCAL_LINK_LIB = ${LOCAL_LINK_LIB}")
 
 add_subdirectory(test)
