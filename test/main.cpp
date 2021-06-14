@@ -21,18 +21,24 @@ struct malloc_chunk
 
 #define MIN_CHUNK_SIZE (offsetof(struct malloc_chunk, fd_nextsize))
 
-void checkPoint(void* Ptr)
-{
-    spdlog::info("Check point ptr is %p", fmt::ptr(Ptr));
-}
+void checkPoint() { }
 
 int main(void)
 {
-    checkPoint(nullptr);
-    
+    checkPoint();
+
     int* intPtr = static_cast<int*>(malloc(sizeof(int)));
-    checkPoint(intPtr);
+    checkPoint();
     *intPtr = 20;
+    checkPoint();
+    free(intPtr);
+
+    intPtr = static_cast<int*>(malloc(sizeof(int) * 30));
+    free(intPtr);
+    intPtr = static_cast<int*>(malloc(sizeof(int) * 1024));
+    free(intPtr);
+    intPtr = static_cast<int*>(malloc(sizeof(int) * 30));
+    free(intPtr);
     spdlog::info("Ptr info is {}", fmt::ptr(intPtr));
     spdlog::info("Glibc Version is {}", gnu_get_libc_version());
 

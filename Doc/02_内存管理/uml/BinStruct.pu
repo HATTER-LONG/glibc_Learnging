@@ -1,0 +1,51 @@
+@startuml LargeBinStruct
+left to right direction
+
+(**index64**\n0x7ffff7ca1e00) as  RootIndex
+(**0x430**\n0x602de0) as 1Node
+(**0x430**\n0x602980) as 2Node
+(**0x420**\n0x602530) as 3Node
+(**0x410**\n0x6020f0) as 4Node
+
+RootIndex <-- 1Node #line:blue;line.bold : **bk**
+4Node --> RootIndex #line:red;line.bold : **fd**
+RootIndex --> 1Node #line:red;line.bold : **fd**
+4Node <-- RootIndex #line:blue;line.bold : **bk**
+1Node <-- 3Node #line:blue : **bk_nextsize**
+1Node --> 3Node #line:red : **fd_nextsize**
+
+1Node <-- 2Node #line:blue;line.bold : **bk**
+1Node --> 2Node #line:red;line.bold : **fd**
+2Node <-- 3Node #line:blue;line.bold : **bk**
+2Node --> 3Node #line:red;line.bold : **fd**
+3Node <-- 4Node #line:blue;line.bold : **bk**
+3Node --> 4Node #line:red;line.bold : **fd**
+
+4Node --> 1Node #line:red : **fd_nextsize**
+1Node --> 4Node #line:blue : **bk_nextsize**
+
+4Node --> 3Node #line:blue : **bk_nextsize**
+3Node --> 4Node #line:red : **fd_nextsize**
+@enduml
+
+@startuml NormalBinStruct
+left to right direction
+
+(**index64**\n0x7ffff7ca1e78) as  RootIndex
+(**0x440**\n0x603240) as 1Node
+(**0x440**\n0x603b20) as 2Node
+(**0x440**\n0x6036b0) as 3Node
+
+RootIndex <-- 1Node #line:blue;line.bold : **bk**
+3Node --> RootIndex #line:red;line.bold : **fd**
+RootIndex --> 1Node #line:red;line.bold : **fd**
+3Node <-- RootIndex #line:blue;line.bold : **bk**
+
+1Node <-- 2Node #line:blue;line.bold : **bk**
+1Node --> 2Node #line:red;line.bold : **fd**
+2Node <-- 3Node #line:blue;line.bold : **bk**
+2Node --> 3Node #line:red;line.bold : **fd**
+1Node --> 1Node #line:red : **fd_nextsize**
+1Node --> 1Node #line:blue : **bk_nextsize**
+
+@enduml
