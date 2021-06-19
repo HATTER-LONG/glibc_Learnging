@@ -271,6 +271,7 @@
             {
                 /* Check that the top of the bin is not the record we are going to
                     add (i.e., double free).  */
+                // 判断fastbin的头chunk是否就是我们将要free的chunk，以防止正常用户的double free(hacker另说)
                 if (__builtin_expect (old == p, 0))
                     malloc_printerr ("double free or corruption (fasttop)");
                 old2 = old;
@@ -283,22 +284,24 @@
         size of the chunk that we are adding.  We can dereference OLD
         only if we have the lock, otherwise it might have already been
         allocated again.  */
+         // 如果实际放入的fastbin index与预期的不同，则error
         if (have_lock && old != NULL
         && __builtin_expect (fastbin_index (chunksize (old)) != idx, 0))
         malloc_printerr ("invalid fastbin entry (free)");
     }
     ```
 
-
+4. 当前 chunk 不在 fastbin 中，也不是通过 mmap 分配得来的：
+    - [参考文章--linux 堆溢出学习之malloc堆管理机制原理详解](https://blog.csdn.net/qq_29343201/article/details/59614863)
 
     ```cpp
-  /*
-    Consolidate other non-mmapped chunks as they arrive.
-  */
+    /*
+        Consolidate other non-mmapped chunks as they arrive.
+    */
 
-  else if (!chunk_is_mmapped(p)) {
+    else if (!chunk_is_mmapped(p)) {
 
-    /* If we're single-threaded, don't lock the arena.  */
+        /* If we're single-threaded, don't lock the arena.  */
     if (SINGLE_THREAD_P)
       have_lock = true;
 
@@ -309,17 +312,21 @@
 
     /* Lightweight tests: check whether the block is already the
        top block.  */
+    // 判断当前chunk是否top chunk
     if (__glibc_unlikely (p == av->top))
       malloc_printerr ("double free or corruption (top)");
     /* Or whether the next chunk is beyond the boundaries of the arena.  */
+    // 或者下一个块是否超出了 arena 的边界。
     if (__builtin_expect (contiguous (av)
               && (char *) nextchunk
               >= ((char *) av->top + chunksize(av->top)), 0))
     malloc_printerr ("double free or corruption (out)");
     /* Or whether the block is actually not marked used.  */
+    //或者块是否实际上没有被标记为使用。
     if (__glibc_unlikely (!prev_inuse(nextchunk)))
       malloc_printerr ("double free or corruption (!prev)");
 
+    // 判断下一块 chunksize 是否正常
     nextsize = chunksize(nextchunk);
     if (__builtin_expect (chunksize_nomask (nextchunk) <= CHUNK_HDR_SZ, 0)
     || __builtin_expect (nextsize >= av->system_mem, 0))
@@ -327,7 +334,7 @@
 
     free_perturb (chunk2mem(p), size - CHUNK_HDR_SZ);
 
-    /* consolidate backward */
+    /* consolidate backward  向后合并*/
     if (!prev_inuse(p)) {
       prevsize = prev_size (p);
       size += prevsize;
@@ -341,19 +348,19 @@
       /* get and clear inuse bit */
       nextinuse = inuse_bit_at_offset(nextchunk, nextsize);
 
-      /* consolidate forward */
+      /* consolidate forward 向前合并*/
       if (!nextinuse) {
     unlink_chunk (av, nextchunk);
     size += nextsize;
       } else
-    clear_inuse_bit_at_offset(nextchunk, 0);
+    clear_inuse_bit_at_offset(nextchunk, 0); //清空使用标志位
 
       /*
     Place the chunk in unsorted chunk list. Chunks are
     not placed into regular bins until after they have
     been given one chance to be used in malloc.
       */
-
+    //对fastbin中的chunk进行合并并添加到unsortedbin中
       bck = unsorted_chunks(av);
       fwd = bck->fd;
       if (__glibc_unlikely (fwd->bk != bck))
@@ -397,37 +404,43 @@
       don't want to consolidate on each free.  As a compromise,
       consolidation is performed if FASTBIN_CONSOLIDATION_THRESHOLD
       is reached.
-    */
 
+      如果腾出大空间，巩固可能的周围大块。
+      然后，如果总未使用的最高内存超过trim阈值，要求 malloc_trim 减少顶部。
+
+      除非max_fast为0，否则我们不知道是否有fastbins与顶部接壤，因此我们无法确定阈值是否除非合并 fastbins，否则已经达到。
+      但我们不想在每个 free bin 上整合。作为妥协，如果 FASTBIN_CONSOLIDATION_THRESHOLD，则执行合并到达了。 
+    */
+    //如果是主分配区，并且主分配区的top chunk大于一定的值，就通过systrim缩小top chunk。如果是非主分配区，就获得top chunk对应的非主分配区的heap_info指针，调用heap_trim尝试缩小该heap。后面来看systrim和heap_trim这两个函数。
     if ((unsigned long)(size) >= FASTBIN_CONSOLIDATION_THRESHOLD) {
       if (atomic_load_relaxed (&av->have_fastchunks))
     malloc_consolidate(av);
 
       if (av == &main_arena) {
-#ifndef MORECORE_CANNOT_TRIM
-    if ((unsigned long)(chunksize(av->top)) >=
-        (unsigned long)(mp_.trim_threshold))
-      systrim(mp_.top_pad, av);
-#endif
-      } else {
-    /* Always try heap_trim(), even if the top chunk is not
-       large, because the corresponding heap might go away.  */
-    heap_info *heap = heap_for_ptr(top(av));
+    #ifndef MORECORE_CANNOT_TRIM
+        if ((unsigned long)(chunksize(av->top)) >=
+            (unsigned long)(mp_.trim_threshold))
+        systrim(mp_.top_pad, av);
+    #endif
+        } else {
+        /* Always try heap_trim(), even if the top chunk is not
+        large, because the corresponding heap might go away.  */
+        heap_info *heap = heap_for_ptr(top(av));
 
-    assert(heap->ar_ptr == av);
-    heap_trim(heap, mp_.top_pad);
-      }
+        assert(heap->ar_ptr == av);
+        heap_trim(heap, mp_.top_pad);
+        }
+        }
+
+        if (!have_lock)
+        __libc_lock_unlock (av->mutex);
     }
-
-    if (!have_lock)
-      __libc_lock_unlock (av->mutex);
-  }
-  /*
-    If the chunk was allocated via mmap, release via munmap().
-  */
-
-  else {
-    munmap_chunk (p);
-  }
-}
-```
+    /*
+        If the chunk was allocated via mmap, release via munmap().
+    */
+    //说明chunk还是通过mmap分配的，就调用munmap_chunk释放它。
+    else {
+        munmap_chunk (p);
+    }
+    }
+    ```
