@@ -7,7 +7,9 @@
       - [入口流程--`ptmalloc_init`](#入口流程--ptmalloc_init)
         - [入口流程--`malloc_init_state`](#入口流程--malloc_init_state)
   - [调用流程图](#调用流程图)
-  - [内存管理数据结构之分配区](#内存管理数据结构之分配区)
+  - [Q/A](#qa)
+    - [分配区](#分配区)
+    - [bin 成员](#bin-成员)
   - [内存管理数据结构之 bins](#内存管理数据结构之-bins)
     - [特殊 bins 类型](#特殊-bins-类型)
   - [内存管理数据结构之 chunk](#内存管理数据结构之-chunk)
@@ -20,6 +22,7 @@
 当调用 malloc 申请内存时，通过 `strong_alias` 别名机制是直接调用到 __libc_malloc 函数上：
 
 > strong_alias : 强别名，当出现相同符号的定义会发成重定义冲突。
+>
 > weak_alias : 弱别名，当出现相同名字的不会重定义，只有当没有冲突时才使用若定义别名。
 
 ```c
@@ -101,12 +104,37 @@ __libc_malloc (size_t bytes)
 ## 入口流程
 
 - [参考文章-C++性能榨汁机之分支预测器](https://zhuanlan.zhihu.com/p/36543235)
+- [参考文章-prevent allocs larger than PTRDIFF_MAX on Android](https://github.com/jemalloc/jemalloc/pull/295)
+- [参考文章-What is the maximum size of an array in C?](https://stackoverflow.com/questions/9386979/what-is-the-maximum-size-of-an-array-in-c)
 
 ```c
 void *weak_variable (*__malloc_hook)
     (size_t __size, const void *) = malloc_hook_ini;
-    
-    .......
+
+# if __WORDSIZE == 64
+#  define SIZE_MAX  (18446744073709551615UL)
+# else
+#  if __WORDSIZE32_SIZE_ULONG
+#   define SIZE_MAX  (4294967295UL)
+#  else
+#   define SIZE_MAX  (4294967295U)
+#  endif
+# endif
+
+# if __WORDSIZE == 64
+#  define PTRDIFF_MIN  (-9223372036854775807L-1)
+#  define PTRDIFF_MAX  (9223372036854775807L)
+# else
+#  if __WORDSIZE32_PTRDIFF_LONG
+#   define PTRDIFF_MIN  (-2147483647L-1)
+#   define PTRDIFF_MAX  (2147483647L)
+#  else
+#   define PTRDIFF_MIN  (-2147483647-1)
+#   define PTRDIFF_MAX  (2147483647)
+#  endif
+# endif
+
+    ..............
 
 void *
 __libc_malloc (size_t bytes)
@@ -115,21 +143,25 @@ __libc_malloc (size_t bytes)
   void *victim;
 
   _Static_assert (PTRDIFF_MAX <= SIZE_MAX / 2,
-                  "PTRDIFF_MAX is not more than half of SIZE_MAX"); //TODO: WHY？
+                  "PTRDIFF_MAX is not more than half of SIZE_MAX");
 
   void *(*hook) (size_t, const void *)  // 可以重载自己的内存分配方法给 __malloc_hook
     = atomic_forced_read (__malloc_hook);
-  if (__builtin_expect (hook != NULL, 0)) // 这里会直接调用过去，默认是 ptmalloc 的 malloc_hook_ini
+  if (__builtin_expect (hook != NULL, 0)) // 这里默认调用的是 ptmalloc 的 malloc_hook_ini
     return (*hook)(bytes, RETURN_ADDRESS (0)); // 当第一次调用完成 malloc_hook_ini 后，__malloc_hook 会被置空
 
     .......
 }
 ```
 
-1. 可以看出如果没有重定义 `__malloc_hook` 弱别名就使用默认的 `malloc_hook_ini`，通过 atomic_forced_read 原子读取。
+1. 可以看出如果没有重定义 `__malloc_hook` 弱别名就使用默认的 `malloc_hook_ini`，其使用 atomic_forced_read 原子读取。
 2. 判断 `__malloc_hook` 是否为空，如果不为空则进行调用。
    - `__builtin_expect` 用于编译其优化，告知编译器此判断语句更容易为 true 或 false，便于 cpu 的分支预测。
    - `__glibc_unlikely` 和 `__glibc_likely` 都是包装了下 `__builtin_expect`，功能是一样的。
+3. 看下最开始的静态断言判断：
+   - `SIZE_MAX` 是指 size_t 的最大范围，也就是当前系统最大的寻址范围。
+   - 而 `PTRDIFF_MAX` 是指 ptrdiff_t 的最大范围，ptrdiff_t 常用于存放两个地址做减法后的结果。
+   - `SIZE_MAX` 是 UL 类型，`PTRDIFF_MAX` 是 L 类型：[上一节进程内存布局](./01_基础知识。md#进程内存布局）从地址空间可以看出堆栈的地址范围不可能超过地址的一半，通常 32 位系统是 3：1 分配的堆空间（1G)，即使是 64 位系统，由于与内核对半分配也不可能超过 SIZE_MAX 的一半（128T），因此 PTRDIFF_MAX <= SIZE_MAX / 2。
 
 ### 入口流程--`malloc_hook_ini`
 
@@ -200,7 +232,7 @@ ptmalloc_init (void)
 ```
 
 1. 通过全局变量 `__malloc_initialized` 标识 ptmalloc 初始化状态：-1 未初始化、0 正在初始化、1 初始化完成。
-2. 将主分配区 `main_arena` 分配给进行初始化的线程。//TODO: 什么是主分配区？还有什么其他种类的分配区？作用是什么？。
+2. 将主分配区 `main_arena` 分配给进行初始化的线程。*// Q1: 什么是主分配区、分配区又指什么，分配区各个成员作用都有哪些？*
 3. 调用 `malloc_init_state` 初始话主分配区。
 4. `TUNABLE_GET` 可调参数是 GNU C 库中的一个特性，它允许应用程序作者和发行版维护人员改变运行时库的行为以匹配他们的工作负载。具体详见参考文章 `Tunable Framework`。
 
@@ -224,11 +256,6 @@ malloc_init_state (mstate av)
 
   /* Establish circular links for normal bins */
   /* NBINS=128 */
-  /**
-   * 说明：ptmalloc 通过 bins 数组来管理 chunk 双向链表，初始化的 chunk 链表指针都指向了自己
-   * 1. bins 上管理三种 bin：unsorted bin、small bins 和 large bins
-   * 2. 下标默认从 1 开始，其中下标为 1 的，则是 unsorted bin
-   */
   for (i = 1; i < NBINS; ++i)
     {
       bin = bin_at (av, i);
@@ -246,7 +273,27 @@ malloc_init_state (mstate av)
   av->top = initial_top (av);
 }
 
+.........................
+
+/* addressing -- note that bin_at(0) does not exist */
+#define bin_at(m, i) \
+  (mbinptr) (((char *) &((m)->bins[((i) - 1) * 2]))     \
+             - offsetof (struct malloc_chunk, fd))
+
+#define set_noncontiguous(M)   ((M)->flags |= NONCONTIGUOUS_BIT)
+
+#define set_max_fast(s) \
+  global_max_fast = (((size_t) (s) <= MALLOC_ALIGN_MASK - SIZE_SZ)	\
+                     ? MIN_CHUNK_SIZE / 2 : ((s + SIZE_SZ) & ~MALLOC_ALIGN_MASK))
+
+#define initial_top(M)              (unsorted_chunks (M))
 ```
+
+1. `从下标 1` 开始对分配区 bin 成员进行初始化，将每个 bin 的 fd、bk 都置为自身。 *// Q2: bin 成员作用是什么，为什么要从下标 1 开始？*
+2. 如果初始化非主分配区，调用 set_noncontiguous 设置 NONCONTIGUOUS_BIT 标识位。*// Q3: NONCONTIGUOUS_BIT 是什么，为什么要针对非主分配区？*
+3. 如果是主分配区通过 set_max_fast 初始化 global_max_fast 的大小。*// Q4: global_max_fast 是什么，有什么作用？*
+4. 原子操作设置分配区 have_fastchunks 成员为 false。
+5. 初始化分配区 top 成员。 *// Q5：top 成员特点，以及为什么这么初始化？*
 
 ## 调用流程图
 
@@ -256,107 +303,447 @@ malloc_init_state (mstate av)
 
 ![第二次调用](./pic/09.png)
 
-## 内存管理数据结构之分配区
+## Q/A
+
+- Q1: 什么是主分配区、分配区又指什么，分配区各个成员作用都有哪些？
+- Q2: bin 成员作用是什么，为什么要从下标 1 开始？
+- Q3: NONCONTIGUOUS_BIT 是什么，为什么要针对非主分配区？
+- Q4: global_max_fast 是什么，有什么作用？
+- Q5：top 成员特点，以及为什么这么初始化？
+
+### 分配区
 
 - [参考文章-Wolfram Gloger's malloc homepage](http://www.malloc.de/en/)
+- [参考文章-ptmalloc 源码分析 - 分配器状态机 malloc_state（02）](https://blog.csdn.net/initphp/article/details/109489720)
+- [参考文章-Understanding the glibc malloc binning implementation](https://stackoverflow.com/questions/63600405/understanding-the-glibc-malloc-binning-implementation)
 
 1. 为什么要有 ptmalloc？
    - 最初版本的 malloc 内存分配器只有一个主分配区，每次分配内存都必须对住分配区加锁，完成后再释放使得多线程情况下效率较差。而当前的 ptmalloc 增加了对应`非主分配区`，主分配区与非主分配区用环形链表进行管理，每一个分配区利用互斥锁 (mutex) 使线程对于该分配区的访问互斥。
 
-2. 什么是分配区？主分配区与非主分配区有什么区别？
+2. 具体分配区如何避免多线程问题？
+   - 当一个线程使用 malloc 分配内存的时候，首选会检查该线程环境中是否已经存在一个分配区，如果存在，则对该分配区进行加锁，并使用该分配区进行内存分配。
+   - 如果分配失败，则遍历链表中获取的未加锁的分配区。
+   - 如果整个链表都没有未加锁的分配区，则 ptmalloc 开辟一个新的分配区，假如 malloc_state->next 全局队列，并该线程在改内存分区上进行分配。
+   - 当释放这块内存的时候，首先获取分配区的锁，然后释放内存，如果其他线程正在使用，则等待其他线程。
+
+3. 什么是分配区？主分配区与非主分配区有什么区别？
    - ptmalloc 通过 malloc_state 的状态机来管理内存的分配，即分配区。malloc_state 主要用来管理分配的内存块，比如是否有空闲的 chunk，有什么大小的空闲 chunk 等等。（ chunk 是内存管理的最小单元）。当用户层调用 malloc/free 等函数的时候，都会通过 ptmalloc 内核模块进行内存的分配，每一块从操作系统上分配的内存，都会使用 malloc_state 结构体来管理。
    - 每个进程有一个主分配区，也可以允许有多个非主分配区。
    - 主分配区可以使用 brk 和 mmap 来分配，而非主分配区只能使用 mmap 来映射内存块。
    - 非主分配区的数量一旦增加，则不会减少。
    - 主分配区和非主分配区形成一个环形链表进行管理。通过 malloc_state->next 来链接。
 
-3. 具体分配去如何避免多线程问题？
-   - 当一个线程使用malloc分配内存的时候，首选会检查该线程环境中是否已经存在一个分配区，如果存在，则对该分配区进行加锁，并使用该分配区进行内存分配。
-   - 如果分配失败，则遍历链表中获取的未加锁的分配区。
-   - 如果整个链表都没有未加锁的分配区，则ptmalloc开辟一个新的分配区，假如malloc_state->next全局队列，并该线程在改内存分区上进行分配。
-   - 当释放这块内存的时候，首先获取分配区的锁，然后释放内存，如果其他线程正在使用，则等待其他线程。
+4. 下面详细解释下，malloc_state 每个成员的作用：
 
     ```c
-    /*
-    ----------- Internal state representation and initialization -----------
-    */
-
-    /*
-    have_fastchunks indicates that there are probably some fastbin chunks.
-    It is set true on entering a chunk into any fastbin, and cleared early in
-    malloc_consolidate.  The value is approximate since it may be set when there
-    are no fastbin chunks, or it may be clear even if there are fastbin chunks
-    available.  Given it's sole purpose is to reduce number of redundant calls to
-    malloc_consolidate, it does not affect correctness.  As a result we can safely
-    use relaxed atomic accesses.
-    */
-
     struct malloc_state
     {
-    /* Serialize access.  */
-    // 线程锁，只有当前申请线程拿到后才能使用分配区申请内存，否则只能继续查找下一个空闲的分配区
-    // 如果所有的分配区都已经加锁，那么 malloc() 会开辟一个新的分配区，把该分配区加入到全局分配区循环链表并加锁，然后使用该分配区进行分配内存操作。
-    __libc_lock_define (, mutex); 
+      /* 
+        线程锁，只有当前申请线程拿到后才能使用分配区申请内存，否则只能继续查找下一个空闲的分配区。
+        如果所有的分配区都已经加锁，那么 malloc() 会开辟一个新的分配区。
+        把该分配区加入到全局分配区循环链表并加锁，然后使用该分配区进行分配内存操作。
+      */
+      __libc_lock_define (, mutex); 
 
-    /* Flags (formerly in max_fast).  */
-    //记录了分配区的一些标志，比如 bit0 记录了分配区是否有 fast bin chunk ，bit1 标识分配区是否能返回连续的虚拟地址空间
-    int flags;
+      /* Flags (formerly in max_fast).  
+        记录了分配区的一些标志，比如 bit0 记录了分配区是否有 fast bin chunk ，bit1 标识分配区是否能返回连续的虚拟地址空间
+      */
+      int flags;
 
-    /* Set if the fastbin chunks contain recently inserted free blocks.  */
-    /* Note this is a bool but not all targets support atomics on booleans.  */
-    // 用于标记是否有 fast bins
-    int have_fastchunks;
+      /* Set if the fastbin chunks contain recently inserted free blocks.  
+        Note this is a bool but not all targets support atomics on booleans.  
+      
+        用于标记是否有 fast bins
+        have_fastchunks 表示可能存在 fastbin 块。在将 chunk 存入任何 fastbin 时设置为 true，并在 malloc_consolidate 中进行合并。
+        该值是近似值，因为它可能在出现即使有 fastbin 可用块也可能为 false。
+        鉴于它的唯一目的是减少冗余调用 malloc_consolidate 的数量不影响正确性。因此，可以安全地使用宽松的原子访问。
+        注：malloc_consolidate 的作用是将 fastbin 进行合并，加入到其他 bin 管理链表上去。
+      */
+      int have_fastchunks;
 
-    /* Fastbins */
-    //fast bins 是 bins 的高速缓冲区，大约有 10 个定长队列。
-    //当用户释放一块不大于 max_fast（默认值 64）的 chunk（一般小内存）的时候，会默认会被放到 fast bins 上。
-    mfastbinptr fastbinsY[NFASTBINS];
+      /* Fastbins 
+        fast bins 是 bins 的高速缓冲区，大约有 10 个定长队列。
+        当用户释放一块不大于 max_fast（默认值 64）的 chunk（一般小内存）的时候，会默认会被放到 fast bins 上。
+      */
+      mfastbinptr fastbinsY[NFASTBINS];
 
-    /* Base of the topmost chunk -- not otherwise kept in a bin */
-    // 指向分配区的 top chunk。top chunk 相当于分配区的顶部空闲内存，当 bins 上都不能满足内存分配要求的时候，就会来 top chunk 上分配。 
-    mchunkptr top;
+      /* Base of the topmost chunk -- not otherwise kept in a bin
+        指向分配区的 top chunk。
+        top chunk 相当于分配区的顶部空闲内存，当 bins 上都不能满足内存分配要求的时候，就会来 top chunk 上分配。 
+      */
+      mchunkptr top;
 
-    /* The remainder from the most recent split of a small request */
-    mchunkptr last_remainder;
+      /* The remainder from the most recent split of a small request */
+      mchunkptr last_remainder;
 
-    /* Normal bins packed as described above 
-    * 常规 bins chunk 的链表数组
-    * 1. unsorted bin：是 bins 的一个缓冲区。当用户释放的内存大于 max_fast 或者 fast bins 合并后的 chunk 都会进入 unsorted bin 上
-    * 2. small bins 和 large bins。small bins 和 large bins 是真正用来放置 chunk 双向链表的。每个 bin 之间相差 8 个字节，并且通过上面的这个列表，可以快速定位到合适大小的空闲 chunk。
-    * 3. 下标 1 是 unsorted bin，2 到 63 是 small bin，64 到 126 是 large bin，共 126 个 bin
-    */
-    mchunkptr bins[NBINS * 2 - 2];
+      /* Normal bins packed as described above 
+      *  常规 bins chunk 的链表数组，具体可以参见 bin 成员分析。
+      */
+      mchunkptr bins[NBINS * 2 - 2];
 
-    /* Bitmap of bins */
-    //表示 bin 数组当中某一个下标的 bin 是否为空，用来在分配的时候加速
-    unsigned int binmap[BINMAPSIZE];
+      /* Bitmap of bins 
+        表示 bin 数组当中某一个下标的 bin 是否为空，用来在分配的时候加速
+      */
+      unsigned int binmap[BINMAPSIZE];
 
-    /* Linked list */
-    /* 分配区全局链表：分配区链表，主分配区放头部，新加入的分配区放 main_arean.next 位置 Linked list */
-    struct malloc_state *next;
+      /* Linked list 
+        分配区全局链表：分配区链表，主分配区放头部，新加入的分配区放 main_arean.next 位置 Linked list 
+      */
+      struct malloc_state *next;
 
-    /* Linked list for free arenas.  Access to this field is serialized
-        by free_list_lock in arena.c.  */
-    struct malloc_state *next_free;
+      /* Linked list for free arenas.  Access to this field is serialized
+          by free_list_lock in arena.c.  
+          空闲的分配区链表
+      */
+      struct malloc_state *next_free;
 
-    /* Number of threads attached to this arena.  0 if the arena is on
-        the free list.  Access to this field is serialized by
-        free_list_lock in arena.c.  */
-    INTERNAL_SIZE_T attached_threads;
+      /* Number of threads attached to this arena.  0 if the arena is on
+          the free list.  Access to this field is serialized by
+          free_list_lock in arena.c.  
+          使用当前分配区的线程数量，0 时存放在 next_free 链表上
+      */
+      INTERNAL_SIZE_T attached_threads;
 
-    /* Memory allocated from the system in this arena.  */
-    INTERNAL_SIZE_T system_mem;
-    INTERNAL_SIZE_T max_system_mem;
+      /* Memory allocated from the system in this arena.  */
+      INTERNAL_SIZE_T system_mem;
+      INTERNAL_SIZE_T max_system_mem;
     };
     ```
 
+### bin 成员
+
+1. bin 成员的作用？
+    - ptmalloc 的空闲 chunk 都是通过在 malloc_state 上的 bins 数组来管理的。一共分为四种类型的 bins：fast bins、 unsorted bin、small bins 和 large bins。
+
+2. 首先让看下分配区结构中涉及到 bin 管理的成员，大体的成员含义上一节已经讲解，本节主要分析每一个成员具体实现的功能：
+
+    ```cpp
+    struct malloc_state
+    {
+      .................
+
+      int have_fastchunks;
+
+      mfastbinptr fastbinsY[NFASTBINS];
+
+      mchunkptr top;
+
+      mchunkptr last_remainder;
+
+      /* Normal bins packed as described above 
+      * 1. unsorted bin：是 bins 的一个缓冲区。当用户释放的内存大于 max_fast 或者 fast bins 合并后的 chunk 都会进入 unsorted bin 上
+      * 2. small bins 和 large bins：small bins 和 large bins 是真正用来放置 chunk 双向链表的。每个 bin 之间相差 8 个字节，并且通过上面的这个列表，可以快速定位到合适大小的空闲 chunk。
+      * 3. 下标 1 是 unsorted bin，2 到 63 是 small bin，64 到 126 是 large bin，共 126 个 bin
+      * 4. BINS 定义为 128 由于在 bins 数组中的每个 bin 都有着一个 fd 和 bk 的指针 所以要乘 2，bin[0] 没有使用 因此 - 2。
+      */
+      mchunkptr bins[NBINS * 2 - 2];
+
+      unsigned int binmap[BINMAPSIZE];
+      ...............
+    }
+    ```
+
+    - bins 结构可以见下图，每两个 bins 元素指向一个双向链表的头与尾，因此需要 `NBINS * 2`：
+
+      ```text
+          Bins Array                Chunk 0                Chunk 1 
+
+      +--> XXXXXXXXXX <-\     /--> +--------+ <-\     /--> +--------+ <-----+
+      |    XXXXXXXXXX    \   /     |  p_sz  |    \   /     |  p_sz  |       |
+      |    XXXXXXXXXX     \ /      +--------+     \ /      +--------+       |
+      |    XXXXXXXXXX      X       |   sz   |      X       |   sz   |       |
+      |    +--------+     / \      +--------+     / \      +--------+       |
+      |    | [2i-2] | -->/   \     |   fd   | -->/   \     |   fd   | ->+   |
+      |    +--------+         \    +--------+         \    +--------+   |   |
+      |    | [2i-1] | -->+     \<- |   bk   |          \<- |   bk   |   |   |
+      |    +--------+    |         +--------+              +--------+   |   |
+      |                  |                                              |   |
+      |                  +----------------------------------------------+---+
+      |                                                                 |
+      +<----------------------------------------------------------------+
+      ```
+
+3. `fast bins`: 相关的成员有 have_fastchunks 与 fastbinsY。
+   - have_fastchunks：如前文所述，用于标识是否存在空闲的 fast bins 内存块。
+   - fastbinsY：用于管理 fast bins 内存块，
+   - 当用户释放一块不大于 max_fast（**主分配区初始化时配置，默认值 *64 * SIZE_SZ / 4***）的 chunk，会默认会被放到 fast bins 上。当用户下次需要申请内存的时候首先会到 fast bins 上寻找是否有合适的 chunk，然后才会到 bins 上空闲链表里面查找的 chunk。每次申请内存 如果 fast bins 以及 small bins 无法满足需求，ptmalloc 都会遍历 fast bin 看是否有合适的 chunk 需要合并到 unorder bins 上，再尝试进行后续分配，避免过多的缓存。
+
+    ```cpp
+    /*
+      Fastbins
+        包含最近释放的 small chunk 的列表数组。
+        快箱没有使用双向链表，不仅仅单链表的速度更快，而且由于每个 fast bin 链表大小都是一致的因此不需要从中间进行删除，因此采用单链表结构。
+        此外，与普通 bins 不同的是，它们甚至没有按 FIFO 顺序处理（它们使用更快的 LIFO），因为在瞬态上下文中，通常使用 fastbins 排序并不重要。
+
+        fastbins 中的 chunk 保持其 inuse 位设置，因此它们不能与其他空闲 chunk 合并。 
+        需要通过 malloc_consolidate 释放 fastbins 中的所有 chunk 并将它们合并其他 free chunk。 
+    */
+
+    typedef struct malloc_chunk *mfastbinptr;
+    #define fastbin(ar_ptr, idx) ((ar_ptr)->fastbinsY[idx])
+
+    /* offset 2 to use otherwise unindexable first 2 bins */
+    #define fastbin_index(sz) \
+      ((((unsigned int) (sz)) >> (SIZE_SZ == 8 ? 4 : 3)) - 2)
+
+
+    /* The maximum fastbin request size we support */
+    // 80 * size_t / 4 = 160 Byte
+    #define MAX_FAST_SIZE     (80 * SIZE_SZ / 4) 
+
+    // request2size 用于将申请的内存大小通过对齐后计算所需的 chunk size，后续章节会有介绍。
+    // request2size (MAX_FAST_SIZE) = ((160 + 8) + MALLOC_ALIGN_MASK(01111)) and ~MALLOC_ALIGN_MASK(10000) = 176 Byte
+    // fastbin_index (176) = 176 >> 4 - 2 = 11 - 2 = 9
+    // TODO: 打印证明
+    #define NFASTBINS  (fastbin_index (request2size (MAX_FAST_SIZE)) + 1) 
+
+    /*
+      Set value of max_fast.
+      Use impossibly small value if 0.
+      Precondition: there are no existing fastbin chunks in the main arena.
+      Since do_check_malloc_state () checks this, we call malloc_consolidate ()
+      before changing max_fast.  Note other arenas will leak their fast bin
+      entries if max_fast is reduced.
+    */
+
+    #define set_max_fast(s) \
+      global_max_fast = (((size_t) (s) <= MALLOC_ALIGN_MASK - SIZE_SZ) \
+                        ? MIN_CHUNK_SIZE / 2 : ((s + SIZE_SZ) & ~MALLOC_ALIGN_MASK))
+
+    static inline INTERNAL_SIZE_T
+    get_max_fast (void)
+    {
+      /* Tell the GCC optimizers that global_max_fast is never larger
+        than MAX_FAST_SIZE.  This avoids out-of-bounds array accesses in
+        _int_malloc after constant propagation of the size parameter.
+        (The code never executes because malloc preserves the
+        global_max_fast invariant, but the optimizers may not recognize
+        this.)  */
+      if (global_max_fast > MAX_FAST_SIZE)
+        __builtin_unreachable ();
+      return global_max_fast;
+    }
+
+    #ifndef DEFAULT_MXFAST
+    #define DEFAULT_MXFAST     (64 * SIZE_SZ / 4)
+    #endif
+    ```
+
+4. `unsorted bin`：是 bins 的一个缓冲区，bins 数组下标为 1 的即是 unstored bin。当用户释放的内存大于 max_fast 或者 fast bins 合并后的 chunk 都会进入 unsorted bin 上。当用户 malloc 的时候，如果 fast bins 以及 small bins 都无法满足需求后，首先通过 malloc_consolidate 进行合并 fast bins 到 unsorted bin 上，在使用 large bins 进行分配前，会遍历整个 unsorted bin 将其管理的 chunk 按照大小标准插入到 small bins 或者 large bins 中，再尝试分配。//TODO：待验证！！！
+
+    ```cpp
+    /*
+        Unsorted chunks
+
+        所有 chunk 经过切割后的剩余部分 chunk，以及 free 的 chunk, 首先被放在 "unsorted" bin 中，
+        然后在 malloc 给他们一个机会被使用之前放置的进入 常规 bins 中。
+
+        所以，基本上，未排序的块列表作为一个队列,以 free (和 malloc_consolidated) 存入 chunk,
+        在 malloc 中使用(要么使用，要么放在 bins 里)。
+
+        从未为未排序的块设置 NON_MAIN_ARENA 标志，因此它在大小比较中不必考虑。
+        
+    */
+
+    /* The otherwise unindexable 1-bin is used to hold unsorted chunks. */
+    #define unsorted_chunks(M)          (bin_at (M, 1))
+
+    ```
+
+5. `small bins`：小于 512 字节（64 位机器 1024 字节）的 chunk 被称为 small chunk，而保存 small chunks 的 bin 被称为 small bin。**数组从 2 开始编号到 63，前 62 个 bin 为 small bins**，small bin 每个 bin 之间相差 8 个字节（64 位 16 字节），同一个 small bin 中的 chunk 具有相同大小。起始 bin 大小为 16 字节（64 位系统 32）。
+
+6. `large bins`：大于等于 512 字节（64 位机器 1024 字节）的 chunk 被称为 large chunk，而保存 large chunks 的 bin 被称为 large bin。**位于 small bins 后面，数组编号从 64 开始，后 64 个 bin 为 large bins**。同一个 bin 上的 chunk，可以大小不一定相同。large bins 都是通过等差步长的方式进行拆分。（以 32 位系统为例，前 32 个 bin 步长 64，后 16 个 bin 步长 512，后 8 个步长 4096，后四个 32768，后 2 个 262144）（编号 63 到 64 的步长跟）。起始 bin 大小为 512 字节（64 位系统 1024）。
+
+    ```cpp
+    /*
+   Bins
+
+    An array of bin headers for free chunks. Each bin is doubly
+    linked.  The bins are approximately proportionally (log) spaced.
+    There are a lot of these bins (128). This may look excessive, but
+    works very well in practice.  Most bins hold sizes that are
+    unusual as malloc request sizes, but are more usual for fragments
+    and consolidated sets of chunks, which is what these bins hold, so
+    they can be found quickly.  All procedures maintain the invariant
+    that no consolidated chunk physically borders another one, so each
+    chunk in a list is known to be preceeded and followed by either
+    inuse chunks or the ends of memory.
+
+    Chunks in bins are kept in size order, with ties going to the
+    approximately least recently used chunk. Ordering isn't needed
+    for the small bins, which all contain the same-sized chunks, but
+    facilitates best-fit allocation for larger chunks. These lists
+    are just sequential. Keeping them in order almost never requires
+    enough traversal to warrant using fancier ordered data
+    structures.
+
+    Chunks of the same size are linked with the most
+    recently freed at the front, and allocations are taken from the
+    back.  This results in LRU (FIFO) allocation order, which tends
+    to give each chunk an equal opportunity to be consolidated with
+    adjacent freed chunks, resulting in larger free chunks and less
+    fragmentation.
+
+    To simplify use in double-linked lists, each bin header acts
+    as a malloc_chunk. This avoids special-casing for headers.
+    But to conserve space and improve locality, we allocate
+    only the fd/bk pointers of bins, and then use repositioning tricks
+    to treat these as the fields of a malloc_chunk*.
+
+
+    用于空闲块的 bin 标头数组。每个垃圾桶都是双重的
+    链接。 bin 大约按比例 (log) 间隔。
+    有很多这样的垃圾箱（128）。这可能看起来有些过分，但是
+    在实践中效果很好。大多数垃圾箱的尺寸都是
+    不寻常的 malloc 请求大小，但更常见于片段
+    和合并的块集，这就是这些垃圾箱保存的内容，所以
+    他们可以很快找到。所有过程保持不变
+    没有合并的块在物理上与另一个块相邻，所以每个
+    已知列表中的块在前面和后面是
+    使用块或内存的末端。
+
+    垃圾箱中的大块按大小顺序排列，连接到
+    大约最近最少使用的块。不需要订购
+    对于小垃圾箱，它们都包含相同大小的块，但是
+    促进对较大块的最佳分配。这些清单
+    只是顺序。使它们井然有序几乎不需要
+    足够的遍历以保证使用更高级的有序数据
+    结构。
+
+    相同大小的块链接最多
+    最近在前面释放，并且分配是从
+    背部。这导致 LRU (FIFO) 分配顺序，这往往
+    给每个块一个平等的机会与
+    相邻的释放块，导致更大的空闲块和更少的
+    碎片化。
+
+    为了简化在双链表中的使用，每个 bin header
+    作为 malloc_chunk。这避免了标题的特殊大小写。
+    但是为了节省空间和改善局部性，我们分配
+    只有 bins 的 fd/bk 指针，然后使用重新定位技巧
+    将这些视为 malloc_chunk*的字段。
+    */
+
+    typedef struct malloc_chunk *mbinptr;
+
+    /* addressing -- note that bin_at(0) does not exist */
+    #define bin_at(m, i) \
+      (mbinptr) (((char *) &((m)->bins[((i) - 1) * 2]))     \
+                - offsetof (struct malloc_chunk, fd))
+
+    /* analog of ++bin */
+    #define next_bin(b)  ((mbinptr) ((char *) (b) + (sizeof (mchunkptr) << 1)))
+
+    /* Reminders about list directionality within bins */
+    #define first(b)     ((b)->fd)
+    #define last(b)      ((b)->bk)
+
+    /*
+      Indexing
+
+        Bins for sizes < 512 bytes contain chunks of all the same size, spaced
+        8 bytes apart. Larger bins are approximately logarithmically spaced:
+
+        64 bins of size       8
+        32 bins of size      64
+        16 bins of size     512
+        8 bins of size    4096
+        4 bins of size   32768
+        2 bins of size  262144
+        1 bin  of size what's left
+
+        There is actually a little bit of slop in the numbers in bin_index
+        for the sake of speed. This makes no difference elsewhere.
+
+        The bins top out around 1MB because we expect to service large
+        requests via mmap.
+
+        Bin 0 does not exist.  Bin 1 is the unordered list; if that would be
+        a valid chunk size the small bins are bumped up one.
+
+        索引
+
+        大小 < 512字节的容器包含所有相同大小、间隔的块
+
+        相隔8个字节。较大的箱子间距近似于对数间隔:
+
+        64个8号箱子
+
+        32个64号的箱子
+
+        16个512号的箱子
+
+        8个4096号的箱子
+
+        4个32768号的垃圾桶
+
+        2个262144号箱子
+
+        剩下的1箱
+
+        在 bin _ index 中的数字中实际上有一点 slop
+
+        为了速度，这在其他地方没有什么区别。
+
+        垃圾箱的最大容量约为1mb，因为我们希望提供大容量的服务
+
+        通过 mmap 请求。
+
+        Bin 0不存在。 Bin 1是无序列表; 如果是的话
+        有效的一块大小的小箱子被提高一个。
+    */
+
+    #define NBINS             128
+    #define NSMALLBINS         64
+    #define SMALLBIN_WIDTH    MALLOC_ALIGNMENT
+    #define SMALLBIN_CORRECTION (MALLOC_ALIGNMENT > CHUNK_HDR_SZ)
+    #define MIN_LARGE_SIZE    ((NSMALLBINS - SMALLBIN_CORRECTION) * SMALLBIN_WIDTH)
+
+    #define in_smallbin_range(sz)  \
+      ((unsigned long) (sz) < (unsigned long) MIN_LARGE_SIZE)
+
+    #define smallbin_index(sz) \
+      ((SMALLBIN_WIDTH == 16 ? (((unsigned) (sz)) >> 4) : (((unsigned) (sz)) >> 3))\
+      + SMALLBIN_CORRECTION)
+
+    #define largebin_index_32(sz)                                                \
+      (((((unsigned long) (sz)) >> 6) <= 38) ?  56 + (((unsigned long) (sz)) >> 6) :\
+      ((((unsigned long) (sz)) >> 9) <= 20) ?  91 + (((unsigned long) (sz)) >> 9) :\
+      ((((unsigned long) (sz)) >> 12) <= 10) ? 110 + (((unsigned long) (sz)) >> 12) :\
+      ((((unsigned long) (sz)) >> 15) <= 4) ? 119 + (((unsigned long) (sz)) >> 15) :\
+      ((((unsigned long) (sz)) >> 18) <= 2) ? 124 + (((unsigned long) (sz)) >> 18) :\
+      126)
+
+    #define largebin_index_32_big(sz)                                            \
+      (((((unsigned long) (sz)) >> 6) <= 45) ?  49 + (((unsigned long) (sz)) >> 6) :\
+      ((((unsigned long) (sz)) >> 9) <= 20) ?  91 + (((unsigned long) (sz)) >> 9) :\
+      ((((unsigned long) (sz)) >> 12) <= 10) ? 110 + (((unsigned long) (sz)) >> 12) :\
+      ((((unsigned long) (sz)) >> 15) <= 4) ? 119 + (((unsigned long) (sz)) >> 15) :\
+      ((((unsigned long) (sz)) >> 18) <= 2) ? 124 + (((unsigned long) (sz)) >> 18) :\
+      126)
+
+    // XXX It remains to be seen whether it is good to keep the widths of
+    // XXX the buckets the same or whether it should be scaled by a factor
+    // XXX of two as well.
+    #define largebin_index_64(sz)                                                \
+      (((((unsigned long) (sz)) >> 6) <= 48) ?  48 + (((unsigned long) (sz)) >> 6) :\
+      ((((unsigned long) (sz)) >> 9) <= 20) ?  91 + (((unsigned long) (sz)) >> 9) :\
+      ((((unsigned long) (sz)) >> 12) <= 10) ? 110 + (((unsigned long) (sz)) >> 12) :\
+      ((((unsigned long) (sz)) >> 15) <= 4) ? 119 + (((unsigned long) (sz)) >> 15) :\
+      ((((unsigned long) (sz)) >> 18) <= 2) ? 124 + (((unsigned long) (sz)) >> 18) :\
+      126)
+
+    #define largebin_index(sz) \
+      (SIZE_SZ == 8 ? largebin_index_64 (sz)                                     \
+      : MALLOC_ALIGNMENT == 16 ? largebin_index_32_big (sz)                     \
+      : largebin_index_32 (sz))
+
+    #define bin_index(sz) \
+      ((in_smallbin_range (sz)) ? smallbin_index (sz) : largebin_index (sz))
+
+    ```
+
 ## 内存管理数据结构之 bins
-
-ptmalloc 的空闲 chunk 都是通过在 malloc_state 上的 bins 数组来管理的。一共分为四种类型的 bins：fast bins、 unsorted bin、small bins 和 large bins。
-
-- `fast bins`：fast bins 是 bins 的高速缓冲区，**大约有 10 个定长队列**。当用户释放一块不大于 max_fast（**默认值 64**）的 chunk（一般小内存）的时候，会默认会被放到 fast bins 上。当用户下次需要申请内存的时候首先会到 fast bins 上寻找是否有合适的 chunk，然后才会到 bins 上空闲链表里面查找的 chunk。ptmalloc 会遍历 fast bin，看是否有合适的 chunk 需要合并到 bins 上。主要放置在 fastbinsY 数组上。
-
-- `unsorted bin`：是 bins 的一个缓冲区，bins 数组下标为 1 的即是 unstored bin。当用户释放的内存大于 max_fast 或者 fast bins 合并后的 chunk 都会进入 unsorted bin 上。当用户 malloc 的时候，先会到 unsorted bin 上查找是否有合适的 bin，如果没有合适的 bin，ptmalloc 会将 unsorted bin 上的 chunk 放入 bins 上，然后到 bins 上查找合适的空闲 chunk。
 
 - `small bins`：小于 512 字节（64 位机器 1024 字节）的 chunk 被称为 small chunk，而保存 small chunks 的 bin 被称为 small bin。**数组从 2 开始编号到 63，前 62 个 bin 为 small bins**，small bin 每个 bin 之间相差 8 个字节（64 位 16 字节），同一个 small bin 中的 chunk 具有相同大小。起始 bin 大小为 16 字节（64 位系统 32）。
 
