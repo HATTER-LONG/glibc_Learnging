@@ -10,7 +10,6 @@
   - [Q/A](#qa)
     - [分配区](#分配区)
     - [bin 成员](#bin-成员)
-  - [内存管理数据结构之 bins](#内存管理数据结构之-bins)
     - [特殊 bins 类型](#特殊-bins-类型)
   - [内存管理数据结构之 chunk](#内存管理数据结构之-chunk)
 
@@ -556,7 +555,7 @@ malloc_init_state (mstate av)
 
     ```cpp
     /*
-   Bins
+    Bins
 
     An array of bin headers for free chunks. Each bin is doubly
     linked.  The bins are approximately proportionally (log) spaced.
@@ -616,7 +615,14 @@ malloc_init_state (mstate av)
 
     typedef struct malloc_chunk *mbinptr;
 
-    /* addressing -- note that bin_at(0) does not exist */
+    /* addressing -- note that bin_at(0) does not exist 
+       每个 bin header 类型都是作为 malloc_chunk，但是由于节省空间仅仅在 bins 上分配了 fd 和 bk 两个指针的空间，
+       为了使用者的一致性，offsetof (struct malloc_chunk, fd)) 进行偏移并强转为 mbinptr 类型，最终可以使用 fd 和 bk 成员指针，
+       去到对应的 bins 上数组下标地址内指向的地址。
+
+       因此 bin[0] 不存东西的原因也是防止向前偏移 size_t * 2 的地址使用到了别人的内存空间。
+       // TODO: 证明  bin_at(1) 得到的 mbinptr = bin[0]
+    */
     #define bin_at(m, i) \
       (mbinptr) (((char *) &((m)->bins[((i) - 1) * 2]))     \
                 - offsetof (struct malloc_chunk, fd))
@@ -664,17 +670,6 @@ malloc_init_state (mstate av)
         4 bins of size   32768
         2 bins of size  262144
         1 bin  of size what's left
-
-        在 bin _ index 中的数字中实际上有一点 slop
-
-        为了速度，这在其他地方没有什么区别。
-
-        垃圾箱的最大容量约为1mb，因为我们希望提供大容量的服务
-
-        通过 mmap 请求。
-
-        Bin 0不存在。 Bin 1是无序列表; 如果是的话
-        有效的一块大小的小箱子被提高一个。
     */
 
     #define NBINS             128
@@ -706,9 +701,11 @@ malloc_init_state (mstate av)
       ((((unsigned long) (sz)) >> 18) <= 2) ? 124 + (((unsigned long) (sz)) >> 18) :\
       126)
 
-    // XXX It remains to be seen whether it is good to keep the widths of
-    // XXX the buckets the same or whether it should be scaled by a factor
-    // XXX of two as well.
+    /* 
+        It remains to be seen whether it is good to keep the widths of
+        the buckets the same or whether it should be scaled by a factor
+        of two as well.
+    */
     #define largebin_index_64(sz)                                                \
       (((((unsigned long) (sz)) >> 6) <= 48) ?  48 + (((unsigned long) (sz)) >> 6) :\
       ((((unsigned long) (sz)) >> 9) <= 20) ?  91 + (((unsigned long) (sz)) >> 9) :\
