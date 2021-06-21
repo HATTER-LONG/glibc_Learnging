@@ -309,7 +309,7 @@ malloc_init_state (mstate av)
 - Q2: bin 成员作用是什么，为什么要从下标 1 开始？
 - Q3: NONCONTIGUOUS_BIT 是什么，为什么要针对非主分配区？
 - Q4: global_max_fast 是什么，有什么作用？
-- Q5：top 成员特点，以及为什么这么初始化？
+- Q5: top 成员特点，以及为什么这么初始化？
 
 ### 分配区
 
@@ -591,37 +591,27 @@ malloc_init_state (mstate av)
     to treat these as the fields of a malloc_chunk*.
 
 
-    用于空闲块的 bin 标头数组。每个垃圾桶都是双重的
-    链接。 bin 大约按比例 (log) 间隔。
-    有很多这样的垃圾箱（128）。这可能看起来有些过分，但是
-    在实践中效果很好。大多数垃圾箱的尺寸都是
-    不寻常的 malloc 请求大小，但更常见于片段
-    和合并的块集，这就是这些垃圾箱保存的内容，所以
-    他们可以很快找到。所有过程保持不变
-    没有合并的块在物理上与另一个块相邻，所以每个
-    已知列表中的块在前面和后面是
-    使用块或内存的末端。
+    用于管理空闲块的 bin 标头数组。每个 bin 都是双重的链接。 
+    bin 大约按比例 (log) 间隔。有很多这样的 bins（128）。这可能看起来有些过分的，但是在实践中效果很好。
 
-    垃圾箱中的大块按大小顺序排列，连接到
-    大约最近最少使用的块。不需要订购
-    对于小垃圾箱，它们都包含相同大小的块，但是
-    促进对较大块的最佳分配。这些清单
-    只是顺序。使它们井然有序几乎不需要
-    足够的遍历以保证使用更高级的有序数据
-    结构。
+    大多数 bin 的尺寸都是不寻常的 malloc 请求大小，
+    但这些 bins 保存着更常见的片段和合并的内存块集，可以快速的找到并分配。
 
-    相同大小的块链接最多
-    最近在前面释放，并且分配是从
-    背部。这导致 LRU (FIFO) 分配顺序，这往往
-    给每个块一个平等的机会与
-    相邻的释放块，导致更大的空闲块和更少的
-    碎片化。
+    所有过程保持不变没有合并的块在物理上与另一个块相邻，
+    所以已知每个列表中的块在前面和后面是使用块或内存的末端。
+    
+    large bins 中的 chunk 按大小顺序排列，连接到大约最近最少使用的块。
 
-    为了简化在双链表中的使用，每个 bin header
-    作为 malloc_chunk。这避免了标题的特殊大小写。
-    但是为了节省空间和改善局部性，我们分配
-    只有 bins 的 fd/bk 指针，然后使用重新定位技巧
-    将这些视为 malloc_chunk*的字段。
+    对于 small bins 则不需要排序，它们都包含相同大小的块，但是
+    这对 larger chunk 最佳分配有促进作用。这些队列只是顺序。
+    使它们井然有序几乎不需要遍历足以保证快速定位到需要的数据 bin 下标。
+    
+    chunk 相同的链表，free 是在前端插入，使用时从链表尾端取出。
+    这就是 LRU (FIFO) 分配顺序，往往给每个块一个平等的机会与相邻的释放块，
+    从而保证更大的空闲块和更少的碎片化。
+    
+    为了简化在双链表中的使用，每个 bin header作为 malloc_chunk。这避免了链表头的特殊类型转换。
+    但是为了节省空间和改善局部性，我们分配只有 bins 的 fd/bk 指针，然后使用重新定位技巧，将这些视为 malloc_chunk*的字段。
     */
 
     typedef struct malloc_chunk *mbinptr;
@@ -662,24 +652,18 @@ malloc_init_state (mstate av)
         a valid chunk size the small bins are bumped up one.
 
         索引
-
-        大小 < 512字节的容器包含所有相同大小、间隔的块
-
-        相隔8个字节。较大的箱子间距近似于对数间隔:
-
-        64个8号箱子
-
-        32个64号的箱子
-
-        16个512号的箱子
-
-        8个4096号的箱子
-
-        4个32768号的垃圾桶
-
-        2个262144号箱子
-
-        剩下的1箱
+    
+        Bins 所包含的 chunk’s size < 512 字节为 small chunk 链表上所有的 chunk 大小一致，
+    
+        每个 Bin 管理的大小以 8 字节倍数递增:
+    
+        64 bins of size       8
+        32 bins of size      64
+        16 bins of size     512
+        8 bins of size    4096
+        4 bins of size   32768
+        2 bins of size  262144
+        1 bin  of size what's left
 
         在 bin _ index 中的数字中实际上有一点 slop
 
@@ -742,12 +726,6 @@ malloc_init_state (mstate av)
       ((in_smallbin_range (sz)) ? smallbin_index (sz) : largebin_index (sz))
 
     ```
-
-## 内存管理数据结构之 bins
-
-- `small bins`：小于 512 字节（64 位机器 1024 字节）的 chunk 被称为 small chunk，而保存 small chunks 的 bin 被称为 small bin。**数组从 2 开始编号到 63，前 62 个 bin 为 small bins**，small bin 每个 bin 之间相差 8 个字节（64 位 16 字节），同一个 small bin 中的 chunk 具有相同大小。起始 bin 大小为 16 字节（64 位系统 32）。
-
-- `large bins`：大于等于 512 字节（64 位机器 1024 字节）的 chunk 被称为 large chunk，而保存 large chunks 的 bin 被称为 large bin。**位于 small bins 后面，数组编号从 64 开始，后 64 个 bin 为 large bins**。同一个 bin 上的 chunk，可以大小不一定相同。large bins 都是通过等差步长的方式进行拆分。（以 32 位系统为例，前 32 个 bin 步长 64，后 16 个 bin 步长 512，后 8 个步长 4096，后四个 32768，后 2 个 262144）（编号 63 到 64 的步长跟）。起始 bin 大小为 512 字节（64 位系统 1024）。
 
 ![bins](./pic/06.png)
 ![bins_size](./pic/07.png)
