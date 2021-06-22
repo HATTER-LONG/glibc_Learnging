@@ -485,7 +485,6 @@ malloc_init_state (mstate av)
     #define fastbin_index(sz) \
       ((((unsigned int) (sz)) >> (SIZE_SZ == 8 ? 4 : 3)) - 2)
 
-
     /* The maximum fastbin request size we support */
     // 80 * size_t / 4 = 160 Byte
     #define MAX_FAST_SIZE     (80 * SIZE_SZ / 4) 
@@ -537,8 +536,8 @@ malloc_init_state (mstate av)
         所有 chunk 经过切割后的剩余部分 chunk，以及 free 的 chunk, 首先被放在 "unsorted" bin 中，
         然后在 malloc 给他们一个机会被使用之前放置的进入 常规 bins 中。
 
-        所以，基本上，未排序的块列表作为一个队列,以 free (和 malloc_consolidated) 存入 chunk,
-        在 malloc 中使用(要么使用，要么放在 bins 里)。
+        所以，基本上，未排序的块列表作为一个队列，以 free （和 malloc_consolidated) 存入 chunk,
+        在 malloc 中使用（要么使用，要么放在 bins 里）。
 
         从未为未排序的块设置 NON_MAIN_ARENA 标志，因此它在大小比较中不必考虑。
         
@@ -589,7 +588,6 @@ malloc_init_state (mstate av)
     only the fd/bk pointers of bins, and then use repositioning tricks
     to treat these as the fields of a malloc_chunk*.
 
-
     用于管理空闲块的 bin 标头数组。每个 bin 都是双重的链接。 
     bin 大约按比例 (log) 间隔。有很多这样的 bins（128）。这可能看起来有些过分的，但是在实践中效果很好。
 
@@ -609,8 +607,8 @@ malloc_init_state (mstate av)
     这就是 LRU (FIFO) 分配顺序，往往给每个块一个平等的机会与相邻的释放块，
     从而保证更大的空闲块和更少的碎片化。
     
-    为了简化在双链表中的使用，每个 bin header作为 malloc_chunk。这避免了链表头的特殊类型转换。
-    但是为了节省空间和改善局部性，我们分配只有 bins 的 fd/bk 指针，然后使用重新定位技巧，将这些视为 malloc_chunk*的字段。
+    为了简化在双链表中的使用，每个 bin header 作为 malloc_chunk。这避免了链表头的特殊类型转换。
+    但是为了节省空间和改善局部性，我们分配只有 bins 的 fd/bk 指针，然后使用重新定位技巧，将这些视为 malloc_chunk *的字段。
     */
 
     typedef struct malloc_chunk *mbinptr;
@@ -661,7 +659,7 @@ malloc_init_state (mstate av)
     
         Bins 所包含的 chunk’s size < 512 字节为 small chunk 链表上所有的 chunk 大小一致，
     
-        每个 Bin 管理的大小以 8 字节倍数递增:
+        每个 Bin 管理的大小以 8 字节倍数递增：
     
         64 bins of size       8
         32 bins of size      64
@@ -724,11 +722,19 @@ malloc_init_state (mstate av)
 
     ```
 
-![bins](./pic/06.png)
+- bins 的结构：
+  - bins 长度为 127 ，前 62 为 small bins，后 64 个为 large bin ，下标 1 的 bin 为 unstored bins。
+  - 每个 bin 之间，通过等差数列的方式排序，32 位系统前 64 个 small bins 步长为 8，large bin 前 32 步长为 64；64 位系统分别为 16，128。
+
+![bins](./pic/fasttbin.png)
 ![bins_size](./pic/07.png)
 ![bins_size](./pic/08.png)
 
 ### 特殊 bins 类型
+
+- [参考文章-理解 glibc malloc：malloc() 与 free() 原理图解](https://blog.csdn.net/maokelong95/article/details/52006379)
+- [参考文章-Understanding glibc malloc](https://sploitfun.wordpress.com/2015/02/10/understanding-glibc-malloc/comment-page-1/?blogsub=confirming#subscribe-blog%E3%80%82)
+  - [译文-理解 glibc malloc：主流用户态内存分配器实现原理](https://blog.csdn.net/maokelong95/article/details/51989081)
 
 是三种例外的 chunk 管理方式：`top chunk`，`mmaped chunk` 和 `last remainder chunk`。
 
