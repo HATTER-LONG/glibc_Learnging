@@ -10,8 +10,8 @@
   - [Q/A](#qa)
     - [分配区](#分配区)
     - [bin 成员](#bin-成员)
-    - [特殊 bins 类型](#特殊-bins-类型)
   - [内存管理数据结构之 chunk](#内存管理数据结构之-chunk)
+    - [特殊 bins 类型](#特殊-bins-类型)
 
 ## Ptmalloc 源码 -- `__libc_malloc`
 
@@ -282,7 +282,7 @@ malloc_init_state (mstate av)
 #define set_noncontiguous(M)   ((M)->flags |= NONCONTIGUOUS_BIT)
 
 #define set_max_fast(s) \
-  global_max_fast = (((size_t) (s) <= MALLOC_ALIGN_MASK - SIZE_SZ)	\
+  global_max_fast = (((size_t) (s) <= MALLOC_ALIGN_MASK - SIZE_SZ) \
                      ? MIN_CHUNK_SIZE / 2 : ((s + SIZE_SZ) & ~MALLOC_ALIGN_MASK))
 
 #define initial_top(M)              (unsorted_chunks (M))
@@ -320,9 +320,15 @@ malloc_init_state (mstate av)
    - 最初版本的 malloc 内存分配器只有一个主分配区，每次分配内存都必须对住分配区加锁，完成后再释放使得多线程情况下效率较差。而当前的 ptmalloc 增加了对应`非主分配区`，主分配区与非主分配区用环形链表进行管理，每一个分配区利用互斥锁 (mutex) 使线程对于该分配区的访问互斥。
 
 2. 具体分配区如何避免多线程问题？
-   - 当一个线程使用 malloc 分配内存的时候，首选会检查该线程环境中是否已经存在一个分配区，如果存在，则对该分配区进行加锁，并使用该分配区进行内存分配。
-   - 如果分配失败，则遍历链表中获取的未加锁的分配区。
-   - 如果整个链表都没有未加锁的分配区，则 ptmalloc 开辟一个新的分配区，假如 malloc_state->next 全局队列，并该线程在改内存分区上进行分配。
+   - 当一个线程使用 malloc 分配内存的时候，首选会检查该线程环境中是否已经存在一个分配区，如果存在，则对该分配区进行加锁，并使用该分配区进行内存分配。如果分配失败，则遍历链表中获取的未加锁的分配区。如果整个链表都没有未加锁的分配区，则 ptmalloc 开辟一个新的分配区。分配区的数量受限于内核数：
+
+      ```text
+        For 32 bit systems:
+        Number of arena = 2 * number of cores.
+        For 64 bit systems:
+        Number of arena = 8 * number of cores.
+      ```
+
    - 当释放这块内存的时候，首先获取分配区的锁，然后释放内存，如果其他线程正在使用，则等待其他线程。
 
 3. 什么是分配区？主分配区与非主分配区有什么区别？
@@ -332,7 +338,18 @@ malloc_init_state (mstate av)
    - 非主分配区的数量一旦增加，则不会减少。
    - 主分配区和非主分配区形成一个环形链表进行管理。通过 malloc_state->next 来链接。
 
-4. 下面详细解释下，malloc_state 每个成员的作用：
+4. 管理分配区，以及分配区管理的内存相关数据结构：
+   - heap_info（Heap Header）：一个 thread arena 可以维护多个堆。每个堆都有自己的堆 Header（注：也即头部元数据）。什么时候 Thread Arena 会维护多个堆呢？ 一般情况下，每个 thread arena 都只维护一个堆，但是当这个堆的空间耗尽时，新的堆（而非连续内存区域）就会被 mmap 到这个 aerna 里。
+   - malloc_state（Arena header）： 一个 thread arena 可以维护多个堆，这些堆另外共享同一个 arena header。Arena header 描述的信息包括：bins、top chunk、last remainder chunk 等。
+   - malloc_chunk（Chunk header）：根据用户请求，每个堆被分为若干 chunk。每个 chunk 都有自己的 chunk header。
+
+    ![arean](./pic/arean.png)
+
+     - thread arena 的图示如下（多堆段）：
+
+      ![threadarean](./pic/thread_arean.png)
+
+5. 下面详细解释下，malloc_state 每个成员的作用：
 
     ```c
     struct malloc_state
@@ -471,8 +488,8 @@ malloc_init_state (mstate av)
     /*
       Fastbins
         包含最近释放的 small chunk 的列表数组。
-        快箱没有使用双向链表，不仅仅单链表的速度更快，而且由于每个 fast bin 链表大小都是一致的因此不需要从中间进行删除，因此采用单链表结构。
-        此外，与普通 bins 不同的是，它们甚至没有按 FIFO 顺序处理（它们使用更快的 LIFO），因为在瞬态上下文中，通常使用 fastbins 排序并不重要。
+        Fastbins 没有使用双向链表，不仅仅单链表的速度更快，而且由于每个 fast bin 链表大小都是一致的因此不需要从中间进行删除，因此采用单链表结构。
+        此外，与普通 bins 不同的是，它们甚至没有按 FIFO 顺序处理（它们使用更快的 LIFO, 增删 chunk 发生在链表顶端即可），因为在瞬态上下文中，通常使用 fastbins 排序并不重要。
 
         fastbins 中的 chunk 保持其 inuse 位设置，因此它们不能与其他空闲 chunk 合并。 
         需要通过 malloc_consolidate 释放 fastbins 中的所有 chunk 并将它们合并其他 free chunk。 
@@ -527,7 +544,10 @@ malloc_init_state (mstate av)
     #endif
     ```
 
-4. `unsorted bin`：是 bins 的一个缓冲区，bins 数组下标为 1 的即是 unstored bin。当用户释放的内存大于 max_fast 或者 fast bins 合并后的 chunk 都会进入 unsorted bin 上。当用户 malloc 的时候，如果 fast bins 以及 small bins 都无法满足需求后，首先通过 malloc_consolidate 进行合并 fast bins 到 unsorted bin 上，在使用 large bins 进行分配前，会遍历整个 unsorted bin 将其管理的 chunk 按照大小标准插入到 small bins 或者 large bins 中，再尝试分配。//TODO：待验证！！！
+    ![fastbin](./pic/fastbinstruct.png)
+
+4. `unsorted bin`：是 bins 的一个缓冲区，bins 数组下标为 1 的即是 unstored bin。当用户释放的内存大于 max_fast 或者 fast bins 合并后的 chunk 都会进入 unsorted bin 上。这使得分配器可以重新使用最近 free 掉的 chunk，从而消除了寻找合适 bin 的时间开销，进而加速了内存分配及释放的效率。当用户 malloc 的时候，如果 fast bins 以及 small bins 都无法满足需求后，首先通过 malloc_consolidate 进行合并 fast bins 到 unsorted bin 上，在使用 large bins 进行分配前，会遍历整个 unsorted bin 将其管理的 chunk 按照大小标准插入到 small bins 或者 large bins 中，再尝试分配。//TODO：待验证！！！
+   - unsorted bin 是双向链表管理，用于保存 free chunk。对于 chunk 大小无限制，除开小于 max_fast 的都会插入到这里。
 
     ```cpp
     /*
@@ -547,6 +567,8 @@ malloc_init_state (mstate av)
     #define unsorted_chunks(M)          (bin_at (M, 1))
 
     ```
+
+    ![unsorted_struct](./pic/unsorted_struct.png)
 
 5. `small bins`：小于 512 字节（64 位机器 1024 字节）的 chunk 被称为 small chunk，而保存 small chunks 的 bin 被称为 small bin。**数组从 2 开始编号到 63，前 62 个 bin 为 small bins**，small bin 每个 bin 之间相差 8 个字节（64 位 16 字节），同一个 small bin 中的 chunk 具有相同大小。起始 bin 大小为 16 字节（64 位系统 32）。
 
@@ -722,27 +744,14 @@ malloc_init_state (mstate av)
 
     ```
 
+    ![large_bin](./pic/LargeBinStruct.png)
+
 - bins 的结构：
   - bins 长度为 127 ，前 62 为 small bins，后 64 个为 large bin ，下标 1 的 bin 为 unstored bins。
   - 每个 bin 之间，通过等差数列的方式排序，32 位系统前 64 个 small bins 步长为 8，large bin 前 32 步长为 64；64 位系统分别为 16，128。
 
-![bins](./pic/fasttbin.png)
 ![bins_size](./pic/07.png)
 ![bins_size](./pic/08.png)
-
-### 特殊 bins 类型
-
-- [参考文章-理解 glibc malloc：malloc() 与 free() 原理图解](https://blog.csdn.net/maokelong95/article/details/52006379)
-- [参考文章-Understanding glibc malloc](https://sploitfun.wordpress.com/2015/02/10/understanding-glibc-malloc/comment-page-1/?blogsub=confirming#subscribe-blog%E3%80%82)
-  - [译文-理解 glibc malloc：主流用户态内存分配器实现原理](https://blog.csdn.net/maokelong95/article/details/51989081)
-
-是三种例外的 chunk 管理方式：`top chunk`，`mmaped chunk` 和 `last remainder chunk`。
-
-- `Top chunk`：top chunk 相当于分配区的顶部空闲内存，当 bins 上都不能满足内存分配要求的时候，就会来 top chunk 上分配。top chunk 大小比用户所请求大小还大的时候，top chunk 会分为两个部分：User chunk（用户请求大小）和 Remainder chunk（剩余大小）。其中 Remainder chunk 成为新的 top chunk。当 top chunk 大小小于用户所请求的大小时，top chunk 就通过 sbrk（main arena）或 mmap（thread arena）系统调用来扩容。
-
-- `mmaped chunk`：当分配的内存非常大（大于分配阀值，默认 128K）的时候，需要被 mmap 映射，则会放到 mmaped chunk 上，当释放 mmaped chunk 上的内存的时候会直接交还给操作系统。
-
-- `Last remainder chunk`：Last remainder chunk 是另外一种特殊的 chunk，就像 top chunk 和 mmaped chunk 一样，不会在任何 bins 中找到这种 chunk。当需要分配一个 small chunk, 但在 small bins 中找不到合适的 chunk，如果 last remainder chunk 的大小大于所需要的 small chunk 大小，last remainder chunk 被分裂成两个 chunk，其中一个 chunk 返回给用户，另一个 chunk 变成新的 last remainder chunk。
 
 ## 内存管理数据结构之 chunk
 
@@ -838,3 +847,45 @@ struct malloc_chunk {
   struct malloc_chunk* bk_nextsize;
 };
 ```
+
+1. Allocated chunk: 就是已经分配给用户的 chunk，其图示如下:
+   - chunk：该 Allocated chunk 的起始地址；
+   - mem：该 Allocated chunk 中用户可用区域的起始地址（= chunk + sizeof(malloc_chunk)）；
+   - next_chunk：下一个 chunck（无论类型）的起始地址。
+   - prev_size：若上一个 chunk 可用，则此字段赋值为上一个 chunk 的大小；否则，此字段被用来存储上一个 chunk 的用户数据；
+   - size：此字段赋值本 chunk 的大小，其最后三位包含标志信息：
+     - PREV_INUSE § – 置「1」表示上个 chunk 被分配；
+     - IS_MMAPPED (M) – 置「1」表示这个 chunk 是通过 mmap 申请的（较大的内存）；
+     - NON_MAIN_ARENA (N) – 置「1」表示这个 chunk 属于一个 thread arena。
+
+    ![allocatedchunk](./pic/allocated_chunk.png)
+
+    > malloc_chunk 中的其余结构成员，如 fd、 bk，没有使用的必要而拿来存储用户数据；
+    >
+    > 用户请求的大小被转换为内部实际大小，因为需要额外空间存储 malloc_chunk，此外还需要考虑对齐。
+
+2. Free chunk: 用户已释放的 chunk，其图示如下：
+   - prev_size: 两个相邻 free chunk 会被合并成一个，因此该字段总是保存前一个 allocated chunk 的用户数据；
+   - size: 该字段保存本 free chunk 的大小；
+   - fd: Forward pointer —— 本字段指向同一 bin 中的下个 free chunk（free chunk 链表的前驱指针）；
+   - bk: Backward pointer —— 本字段指向同一 bin 中的上个 free chunk（free chunk 链表的后继指针）。
+
+    ![freechunk](./pic/freeChunk.png)
+
+### 特殊 bins 类型
+
+- [参考文章-理解 glibc malloc：malloc() 与 free() 原理图解](https://blog.csdn.net/maokelong95/article/details/52006379)
+- [参考文章-Understanding glibc malloc](https://sploitfun.wordpress.com/2015/02/10/understanding-glibc-malloc/comment-page-1/?blogsub=confirming#subscribe-blog%E3%80%82)
+  - [译文-理解 glibc malloc：主流用户态内存分配器实现原理](https://blog.csdn.net/maokelong95/article/details/51989081)
+
+是三种例外的 chunk 管理方式：`top chunk`，`mmaped chunk` 和 `last remainder chunk`。
+
+- `Top chunk`：top chunk 相当于分配区的顶部空闲内存，当 bins 上都不能满足内存分配要求的时候，就会来 top chunk 上分配。top chunk 大小比用户所请求大小还大的时候，top chunk 会分为两个部分：User chunk（用户请求大小）和 Remainder chunk（剩余大小）。其中 Remainder chunk 成为新的 top chunk。当 top chunk 大小小于用户所请求的大小时，top chunk 就通过 sbrk（main arena）或 mmap（thread arena）系统调用来扩容。
+
+- `mmaped chunk`：当分配的内存非常大（大于分配阀值，默认 128K）的时候，需要被 mmap 映射，则会放到 mmaped chunk 上，当释放 mmaped chunk 上的内存的时候会直接交还给操作系统。
+
+- `Last remainder chunk`：即最后一次 small request 中因分割而得到的剩余部分，它有利于改进引用局部性，也即后续对 small chunk 的 malloc 请求可能最终被分配得彼此靠近。
+  - 那么 arena 中的若干 chunks，哪个有资格成为 last remainder chunk 呢？
+    - 当用户请求 small chunk 而无法从 small bin 和 unsorted bin 得到服务时，分配器就会通过扫描 binmaps 找到最小非空 bin。正如前文所提及的，如果这样的 bin 找到了，其中最合适的 chunk 就会分割为两部分：返回给用户的 User chunk 、添加到 unsorted bin 中的 Remainder chunk。这一 Remainder chunk 就将成为 last remainder chunk。
+  - 那么引用局部性是如何达成的呢？
+    - 当用户的后续请求 small chunk，并且 last remainder chunk 是 unsorted bin 中唯一的 chunk，该 last remainder chunk 就将分割成两部分：返回给用户的 User chunk、添加到 unsorted bin 中的 Remainder chunk（也是 last remainder chunk）。因此后续的请求的 chunk 最终将被分配得彼此靠近。
