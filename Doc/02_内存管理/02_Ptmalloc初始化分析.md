@@ -160,7 +160,7 @@ __libc_malloc (size_t bytes)
 3. 看下最开始的静态断言判断：
    - `SIZE_MAX` 是指 size_t 的最大范围，也就是当前系统最大的寻址范围。
    - 而 `PTRDIFF_MAX` 是指 ptrdiff_t 的最大范围，ptrdiff_t 常用于存放两个地址做减法后的结果。
-   - `SIZE_MAX` 是 UL 类型，`PTRDIFF_MAX` 是 L 类型：[上一节进程内存布局](./01_基础知识。md#进程内存布局）从地址空间可以看出堆栈的地址范围不可能超过地址的一半，通常 32 位系统是 3：1 分配的堆空间（1G)，即使是 64 位系统，由于与内核对半分配也不可能超过 SIZE_MAX 的一半（128T），因此 PTRDIFF_MAX <= SIZE_MAX / 2。
+   - `SIZE_MAX` 是 UL 类型，`PTRDIFF_MAX` 是 L 类型： [上一节进程内存布局](./01_基础知识。md#进程内存布局) 从地址空间可以看出堆栈的地址范围不可能超过地址的一半，通常 32 位系统是 3：1 分配的堆空间（1G)，即使是 64 位系统，由于与内核对半分配也不可能超过 SIZE_MAX 的一半（128T），因此 PTRDIFF_MAX <= SIZE_MAX / 2。
 
 ### 入口流程--`malloc_hook_ini`
 
@@ -508,8 +508,8 @@ malloc_init_state (mstate av)
 
     // request2size 用于将申请的内存大小通过对齐后计算所需的 chunk size，后续章节会有介绍。
     // request2size (MAX_FAST_SIZE) = ((160 + 8) + MALLOC_ALIGN_MASK(01111)) and ~MALLOC_ALIGN_MASK(10000) = 176 Byte
-    // fastbin_index (176) = 176 >> 4 - 2 = 11 - 2 = 9
-    // TODO: 打印证明
+    // fastbin_index (176) = 177 >> 4 - 2 = 11 - 2 = 9
+    // NFASTBINS = 9 + 1 = 10
     #define NFASTBINS  (fastbin_index (request2size (MAX_FAST_SIZE)) + 1) 
 
     /*
@@ -640,8 +640,8 @@ malloc_init_state (mstate av)
        为了使用者的一致性，offsetof (struct malloc_chunk, fd)) 进行偏移并强转为 mbinptr 类型，最终可以使用 fd 和 bk 成员指针，
        去到对应的 bins 上数组下标地址内指向的地址。
 
-       因此 bin[0] 不存东西的原因也是防止向前偏移 size_t * 2 的地址使用到了别人的内存空间。
-       // TODO: 证明  bin_at(1) 得到的 mbinptr = bin[0]
+       因此不可以 bin_at(0), 会变为负数下标。
+
     */
     #define bin_at(m, i) \
       (mbinptr) (((char *) &((m)->bins[((i) - 1) * 2]))     \
@@ -745,6 +745,7 @@ malloc_init_state (mstate av)
     ```
 
     ![large_bin](./pic/LargeBinStruct.png)
+    ![binsStruct](./pic/binsStruct.png)
 
 - bins 的结构：
   - bins 长度为 127 ，前 62 为 small bins，后 64 个为 large bin ，下标 1 的 bin 为 unstored bins。
@@ -848,7 +849,7 @@ struct malloc_chunk {
 };
 ```
 
-1. Allocated chunk: 就是已经分配给用户的 chunk，其图示如下:
+1. Allocated chunk: 就是已经分配给用户的 chunk，其图示如下：
    - chunk：该 Allocated chunk 的起始地址；
    - mem：该 Allocated chunk 中用户可用区域的起始地址（= chunk + sizeof(malloc_chunk)）；
    - next_chunk：下一个 chunck（无论类型）的起始地址。

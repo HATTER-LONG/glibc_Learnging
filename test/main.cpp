@@ -26,21 +26,14 @@ void checkPoint() { }
 int main(void)
 {
     checkPoint();
-
     int* intPtr = static_cast<int*>(malloc(sizeof(int)));
     checkPoint();
     *intPtr = 20;
     checkPoint();
     free(intPtr);
 
-    intPtr = static_cast<int*>(malloc(sizeof(int) * 30));
-    free(intPtr);
-    intPtr = static_cast<int*>(malloc(sizeof(int) * 1024));
-    free(intPtr);
-    intPtr = static_cast<int*>(malloc(sizeof(int) * 30));
-    free(intPtr);
-    spdlog::info("Ptr info is {}", fmt::ptr(intPtr));
-    spdlog::info("Glibc Version is {}", gnu_get_libc_version());
+    //spdlog::info("Ptr info is {}", fmt::ptr(intPtr));
+    //spdlog::info("Glibc Version is {}", gnu_get_libc_version());
 
-    spdlog::info("MIN_CHUNK_SIZE = {}", MIN_CHUNK_SIZE);
+    //spdlog::info("MIN_CHUNK_SIZE = {}", MIN_CHUNK_SIZE);
 }
