@@ -1,6 +1,6 @@
-# Tcache机制分析
+# Tcache 机制分析
 
-- [Tcache机制分析](#tcache机制分析)
+- [Tcache 机制分析](#tcache-机制分析)
   - [Tcache 机制](#tcache-机制)
     - [Tcache](#tcache)
     - [Tcache 之计算 Chunk](#tcache-之计算-chunk)
@@ -110,13 +110,13 @@ checked_request2size (size_t req, size_t *sz) __nonnull (1)
 
 注意 MIN_CHUNK_SIZE 计算方式是 `malloc_chunk` 结构体偏移到 fd_nextsize 成员的大小，这里涉及到 chunk 共享的知识点：
 
-> 当一个 chunk 为空闲时，至少要有 prev_size、size、fd 和 bk 四个参数，因此 MINSIZE 就代表了这四个参数需要占用的内存大小；而当一个 chunk 被使用时，prev_size 可能会被前一个 chunk 用来存储，而当前 chunk 也可以使用下一个 chunk 的 prev_size，互相抵消;fd 和 bk 也会被当作内存存储数据，因此当 chunk 被使用时，只剩下了 size 参数需要设置，request2size 中的 SIZE_SZ 就是 INTERNAL_SIZE_T 类型的大小，因此至少需要 req + SIZE_SZ 的内存大小。MALLOC_ALIGN_MASK 用来对齐，至此 request2size 就计算出了所需的 chunk 的大小。
+> 当一个 chunk 为空闲时，至少要有 prev_size、size、fd 和 bk 四个参数，因此 MINSIZE 就代表了这四个参数需要占用的内存大小；而当一个 chunk 被使用时，prev_size 可能会被前一个 chunk 用来存储，而当前 chunk 也可以使用下一个 chunk 的 prev_size，互相抵消；fd 和 bk 也会被当作内存存储数据，因此当 chunk 被使用时，只剩下了 size 参数需要设置，request2size 中的 SIZE_SZ 就是 INTERNAL_SIZE_T 类型的大小，因此至少需要 req + SIZE_SZ 的内存大小。MALLOC_ALIGN_MASK 用来对齐，至此 request2size 就计算出了所需的 chunk 的大小。
 
 - 以 64 位系统举例：
 
   - 申请 24 字节堆块为例，24 + chunk 头 = 32 (100000)，接下来加上 MALLOC_ALIGN_MASK 01111 (101111) 最后 MALLOC_ALIGN_MASK 取反 10000，按位与的结果就是 100000 了，即 32。
 
-  - 申请 25 字节堆块，25 + chunk 头 = 41 (100001)，加上 MALLOC_ALIGN_MASK 01111 (110000) 接下来按位与上 ~MALLOC_ALIGN_MASK (10000) 结果为 110000 及 48。
+  - 申请 25 字节堆块，25 + chunk 头 = 33 (100001)，加上 MALLOC_ALIGN_MASK 01111 (110000) 接下来按位与上 ~MALLOC_ALIGN_MASK (10000) 结果为 110000 及 48。
 
 ### Tcache 之计算索引
 
@@ -129,7 +129,7 @@ checked_request2size (size_t req, size_t *sz) __nonnull (1)
 # define csize2tidx(x) (((x) - MINSIZE + MALLOC_ALIGNMENT - 1) / MALLOC_ALIGNMENT)
 ```
 
-chunk 大小减去一个 chunk 头大小，在整除 MALLOC_ALIGNMENT(32位：8, 64位：16)，当前看起来是以某种固定大小进行递增的数组，类似 ptmalloc bins 管理内存一样以递增的方式对应不同的 bins。
+chunk 大小减去一个 chunk 头大小，在整除 MALLOC_ALIGNMENT(32 位：8, 64 位：16)，当前看起来是以某种固定大小进行递增的数组，类似 ptmalloc bins 管理内存一样以递增的方式对应不同的 bins。
 
 - 想要具体了解怎么进行的查找需要先了解几个方面：
   1. Tcache 如何管理内存的？
@@ -143,6 +143,12 @@ chunk 大小减去一个 chunk 头大小，在整除 MALLOC_ALIGNMENT(32位：8,
 按照源码来看下一步会进行 Tcache 初始化：
 
 ```cpp
+
+# define MAYBE_INIT_TCACHE() \
+  if (__glibc_unlikely (tcache == NULL)) \
+    tcache_init();
+
+
 void *
 __libc_malloc (size_t bytes)
 {
@@ -153,14 +159,14 @@ __libc_malloc (size_t bytes)
 }
 ```
 
-- 解析 `MAYBE_INIT_TCACHE` 初始化前，先了解几个 tcache 内存管理的结构体。Tcache 管理 chunk 的方法：在 chunk freed(释放) 时，会将 chunk 链接到一个单链表上，结构如下：
+- 解析 `MAYBE_INIT_TCACHE` 初始化前，先了解几个 tcache 内存管理的结构体。Tcache 管理 chunk 的方法：在 chunk freed（释放） 时，会将 chunk 链接到一个单链表上，结构如下：
 
     ```cpp
     /* We overlay this structure on the user-data portion of a chunk when
     the chunk is stored in the per-thread cache.  */
     typedef struct tcache_entry
     {
-        struct tcache_entry *next;  //FIXME: 问题：单链表长度是如何限制的？
+        struct tcache_entry *next;
         /* This field exists to detect double frees.  */
         struct tcache_perthread_struct *key;  // 每个线程都会有一个
     } tcache_entry;
@@ -207,7 +213,6 @@ __libc_malloc (size_t bytes)
         victim = _int_malloc (ar_ptr, bytes);
         }
 
-
     if (ar_ptr != NULL)
         __libc_lock_unlock (ar_ptr->mutex);
 
@@ -223,11 +228,6 @@ __libc_malloc (size_t bytes)
         }
 
     }
-
-    # define MAYBE_INIT_TCACHE() \
-    if (__glibc_unlikely (tcache == NULL)) \
-        tcache_init();
-
     ```
 
 ### Tcache 之参数限制
@@ -237,7 +237,7 @@ void *
 __libc_malloc (size_t bytes)
 {
     .....
-    DIAG_PUSH_NEEDS_COMMENT; //TODO: 待补充
+    DIAG_PUSH_NEEDS_COMMENT; // 推送诊断信息
     if (tc_idx < mp_.tcache_bins
         && tcache
         && tcache->counts[tc_idx] > 0)
@@ -250,9 +250,9 @@ __libc_malloc (size_t bytes)
 }
 ```
 
-首先回答下上文中的一个问题，单链表如何管理长度的。可以看出是 `mp_` 的成员进行限制，在进行存取时都会进行判断：
+首先回答上文中没有说明的一个问题，单链表如何管理长度的。可以看出是 `mp_` 的成员进行限制，在进行存取时都会进行判断：
 
-> 每个分配区是 struct malloc_state 的一个实例, ptmalloc 使用 malloc_state 来管理分配区, 而参数管理使用 struct malloc_par, 全局拥有一个唯一的 malloc_par 实例。
+> 每个分配区是 struct malloc_state 的一个实例，ptmalloc 使用 malloc_state 来管理分配区，而参数管理使用 struct malloc_par, 全局拥有一个唯一的 malloc_par 实例。
 
 ```cpp
 /* There is only one instance of the malloc parameters.  */

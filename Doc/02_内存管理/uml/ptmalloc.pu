@@ -18,3 +18,12 @@ __libc_malloc -> checked_request2size: 计算 chunk 空间大小
 __libc_malloc -> arena_get: 获取到分配区指针
 __libc_malloc -> _int_malloc: ptmalloc 具体实现
 @enduml
+
+@startuml tcache
+@startuml 第二次调用
+malloc -> __libc_malloc
+__libc_malloc -> checked_request2size: 计算 chunk 空间大小
+__libc_malloc -> arena_get: 获取到分配区指针
+__libc_malloc -> _int_malloc: ptmalloc 具体实现
+@enduml
+@enduml
