@@ -20,10 +20,12 @@ __libc_malloc -> _int_malloc: ptmalloc 具体实现
 @enduml
 
 @startuml tcache
-@startuml 第二次调用
 malloc -> __libc_malloc
 __libc_malloc -> checked_request2size: 计算 chunk 空间大小
-__libc_malloc -> arena_get: 获取到分配区指针
-__libc_malloc -> _int_malloc: ptmalloc 具体实现
-@enduml
+__libc_malloc -> csize2tidx: 根据计算出的 chunk 大小找到对应 tcache 的链表下标
+__libc_malloc -> tcache_init: tcache 初始化
+tcache_init -> arena_get: 获取 tcache 分配区并加锁
+tcache_init -> _int_malloc: 使用 _int_malloc 给 tcache 结构分配内存
+tcache_init -> __libc_lock_unlock: 解锁 arena 分配区
+__libc_malloc -> tcache_get: 如果符合 tcache 分配条件，通过 get 获取内存指针
 @enduml
