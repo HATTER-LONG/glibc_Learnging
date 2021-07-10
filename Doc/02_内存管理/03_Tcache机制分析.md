@@ -279,7 +279,7 @@ static struct malloc_par mp_ =
   .arena_test = NARENAS_FROM_NCORES (1)
 #if USE_TCACHE
   ,
-  .tcache_count = TCACHE_FILL_COUNT, // 每个 tcache bins 可以容纳的 chunk 数量
+  .tcache_count = TCACHE_FILL_COUNT, // 每个 tcache bin 可以容纳的 chunk 数量
   .tcache_bins = TCACHE_MAX_BINS,  // tcache bins 的数量。
   .tcache_max_bytes = tidx2usize (TCACHE_MAX_BINS-1), // 最大的 tcache bins 容量大小，计算 tidx2usize 宏，32 位下是 512，64 位下是 1024
   .tcache_unsorted_limit = 0 /* No limit.  */
@@ -370,3 +370,5 @@ tcache_get (size_t tc_idx)
   - 因为在申请时不需要考虑 pre_size，因为每个 chunk 都是可以复用下一个 chunk 的头 pre_size 内存。而 chunk2mem 偏移则是考虑当前 chunk 结构。
 - 疑问：tcache 链表中 chunk 节点是怎么来的？
   - 这个问题简单解释就是 free 时加入的，细节请关注后续 free 解析文档。
+
+> 实例代码：[tcache.cpp](../../test/tcache.cpp)
