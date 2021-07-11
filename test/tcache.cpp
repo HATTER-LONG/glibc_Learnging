@@ -1,5 +1,7 @@
 #include "allocMacro.h"
+
 #include <cstdlib>
+#include <cstring>
 
 void printAllocInfo(size_t allocSize)
 {
@@ -21,12 +23,15 @@ void printAllocInfo(size_t allocSize)
 void tcacheAlloc()
 {
     const size_t tcacheCommonDiff = MALLOC_ALIGNMENT;
-    const size_t tcacheBinsCount = TCACHE_MAX_BINS + 1; // +1 测试超过 tcache 最大值后内存分配的位置
+    const size_t tcacheBinsCount = TCACHE_MAX_BINS + 1;   // +1 测试超过 tcache 最大值后内存分配的位置
+    const size_t maxBinListLength = 8;
+    const char* longString2test = "1234567890123456789012345678901234567890";
 
-    const size_t maxBinListLength = 2;
-
-    
-    void* ptrArray[tcacheBinsCount][maxBinListLength] = {{nullptr, },};
+    void* ptrArray[tcacheBinsCount][maxBinListLength] = {
+        {
+            nullptr,
+        },
+    };
 
     for (size_t i = 0; i < tcacheBinsCount; i++)
     {
@@ -40,6 +45,7 @@ void tcacheAlloc()
         }
     }
 
+    // strncpy(static_cast<char*>(ptrArray[0][0]), longString2test, strlen(longString2test));
     for (size_t i = 0; i < tcacheBinsCount; i++)
     {
         for (size_t j = 0; j < maxBinListLength; j++)
@@ -587,9 +593,9 @@ pwndbg> heapinfo
 (0x90)     fastbin[7]: 0x0
 (0xa0)     fastbin[8]: 0x0
 (0xb0)     fastbin[9]: 0x0
-                  top: 0x55555557beb0 (size : 0x1f150)                                                                                                                                                            
-       last_remainder: 0x0 (size : 0x0)                                                                                                                                                                           
-            unsortbin: 0x0                                                                                                                                                                                        
+                  top: 0x55555557beb0 (size : 0x1f150)
+       last_remainder: 0x0 (size : 0x0)
+            unsortbin: 0x0
 (0x20)   tcache_entry[0](2): 0x55555556b2e0 --> 0x55555556b2c0
 (0x30)   tcache_entry[1](2): 0x55555556b330 --> 0x55555556b300
 (0x40)   tcache_entry[2](2): 0x55555556b3a0 --> 0x55555556b360
