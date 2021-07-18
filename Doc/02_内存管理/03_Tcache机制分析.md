@@ -11,6 +11,10 @@
   - [总结](#总结)
   - [实践](#实践)
 
+> 如有错误以及图片不清晰等问题请提交 issue，谢谢～
+>
+> 源路径：[https://github.com/HATTER-LONG/glibc_Learnging]
+
 ## Tcache 机制
 
 ### Tcache
@@ -363,7 +367,7 @@ tcache_put (mchunkptr chunk, size_t tc_idx)
      detect a double free.  */
   e->key = tcache;
 
-  e->next = tcache->entries[tc_idx];
+  e->next = PROTECT_PTR (&e->next, tcache->entries[tc_idx]); // PROTECT_PTR 作用见下文
   tcache->entries[tc_idx] = e;
   ++(tcache->counts[tc_idx]);
 }
@@ -374,7 +378,9 @@ static __always_inline void *
 tcache_get (size_t tc_idx)
 {
   tcache_entry *e = tcache->entries[tc_idx];
-  tcache->entries[tc_idx] = e->next;
+  if (__glibc_unlikely (!aligned_OK (e)))
+    malloc_printerr ("malloc(): unaligned tcache chunk detected");
+  tcache->entries[tc_idx] = REVEAL_PTR (e->next);
   --(tcache->counts[tc_idx]);
   e->key = NULL;
   return (void *) e;
@@ -421,24 +427,17 @@ tcache_get (size_t tc_idx)
       It assumes a minimum page size of 4096 bytes (12 bits).  Systems with
       larger pages provide less entropy, although the pointer mangling
       still works.  */
+    /*
+    安全链接：
+      使用来自 ASLR (mmap_base) 的随机性来保护单链表Fast-Bins 和 TCache。
+      也就是说，屏蔽“下一个”指针列表的块，并对它们执行分配对齐检查。
+      这种机制降低了指针劫持的风险，就像在 Small-Bins 双链表中的安全解除链接。
+      它假定最小页面大小为 4096 字节（12 位）。系统与较大的页面提供较少的熵，尽管指针重整仍然有效。 
+    */
+
     #define PROTECT_PTR(pos, ptr) \
       ((__typeof (ptr)) ((((size_t) pos) >> 12) ^ ((size_t) ptr)))
-
-      /* Caller must ensure that we know tc_idx is valid and there's room
-        for more chunks.  */
-      static __always_inline void
-      tcache_put (mchunkptr chunk, size_t tc_idx)
-      {
-        tcache_entry *e = (tcache_entry *) chunk2mem (chunk);
-
-        /* Mark this chunk as "in the tcache" so the test in _int_free will
-          detect a double free.  */
-        e->key = tcache;
-
-        e->next = PROTECT_PTR (&e->next, tcache->entries[tc_idx]);
-        tcache->entries[tc_idx] = e;
-        ++(tcache->counts[tc_idx]);
-      }
+    #define REVEAL_PTR(ptr)  PROTECT_PTR (&ptr, ptr)
 
     ```
 

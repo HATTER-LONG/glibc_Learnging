@@ -7,6 +7,10 @@
     - [`_int_malloc` 之 `small bins`](#_int_malloc-之-small-bins)
     - [`_int_malloc` 之 `malloc_consolidate`](#_int_malloc-之-malloc_consolidate)
 
+> 如有错误以及图片不清晰等问题请提交 issue，谢谢～
+>
+> 源路径：[https://github.com/HATTER-LONG/glibc_Learnging]
+
 ## 内存申请
 
 前几篇文章介绍了 Ptmalloc 初始化、Tcache 缓存，本文将继续 malloc 源码的分析：
@@ -125,7 +129,7 @@ __libc_malloc (size_t bytes)
         mmap.  */
     if (__glibc_unlikely (av == NULL))
         {
-        void *p = sysmalloc (nb, av); //TODO: 完善 sysmalloc 分析
+        void *p = sysmalloc (nb, av);
         if (p != NULL)
         alloc_perturb (p, bytes);
         return p;
@@ -226,7 +230,7 @@ __libc_malloc (size_t bytes)
         #endif
         ```
 
-    - `fastbin_index` 与 `fastbin` 可以看出其组合使用取出目标大小的 chunk 链表节点，`fastbin_index` 判断 64 未系统则除以 8 再减去 2，64 位系统举例： sz 为 32 时，32 >> 4 = 2 -2 = 0; 得出 fastbin 数字的对应 chunk 链表下标，因此可以反推 fastbin 是 32 字节开始，最大的请求为 160 字节（注意这并不是指 fastbin 中 chunk 的大小，其是通过 set_max_fast 设置，后文会分析）：
+    - `fastbin_index` 与 `fastbin` 可以看出其组合使用取出目标大小的 chunk 链表节点，`fastbin_index` 判断 64 位系统则除以 8 再减去 2，64 位系统举例： sz 为 32 时，32 >> 4 = 2 - 2 = 0; 得出 fastbin 数字的对应 chunk 链表下标，因此可以反推 fastbin 是 32 字节开始，最大的请求为 160 字节（注意这并不是指 fastbin 中 chunk 的大小，其是通过 set_max_fast 设置，后文会分析）：
 
         ```cpp
         typedef struct malloc_chunk *mfastbinptr;
@@ -284,7 +288,7 @@ __libc_malloc (size_t bytes)
         #define chunksize_nomask(p)         ((p)->mchunk_size)
         ```
 
-    - 终于 fastbin 内存分配就分析完了，但是有一点需要注意，我们默认 `get_max_fast` 是有效的，但是从源码可以看出 `global_max_fast` 是需要设置的，那么是谁设置的？这就是个疑问了，不过暂时先记住问题，然我们继续向下分析。
+    - 终于 fastbin 内存分配就分析完了，但是有一点需要注意，我们默认 `get_max_fast` 是有效的，但是从源码可以看出 `global_max_fast` 是需要设置的，其就是在 `malloc_init_state` 在 ptmalloc 初始化过程中进行设置。
 
         ```cpp
         /*
@@ -445,7 +449,7 @@ __libc_malloc (size_t bytes)
 
     ```
 
-2. 使用 `bin_at` 得到 `small bin` 的链表 chunk 头地址，:
+2. 使用 `bin_at` 得到 `small bin` 的链表头地址:
 
     ```cpp
     /* addressing -- note that bin_at(0) does not exist */
@@ -513,9 +517,9 @@ __libc_malloc (size_t bytes)
 
     ........
 
-    // XXX It remains to be seen whether it is good to keep the widths of
-    // XXX the buckets the same or whether it should be scaled by a factor
-    // XXX of two as well.
+    //  It remains to be seen whether it is good to keep the widths of
+    //  the buckets the same or whether it should be scaled by a factor
+    //  of two as well.
     #define largebin_index_64(sz)                                                \
     (((((unsigned long) (sz)) >> 6) <= 48) ?  48 + (((unsigned long) (sz)) >> 6) :\
     ((((unsigned long) (sz)) >> 9) <= 20) ?  91 + (((unsigned long) (sz)) >> 9) :\
@@ -615,12 +619,12 @@ static void malloc_consolidate(mstate av) {
           unlink_chunk(av, p); // 将这块空闲的 chunk 从对应的 bins 链表取出
         }
 
-        if (nextchunk != av->top) { // 是否链表为空
-          nextinuse = inuse_bit_at_offset(nextchunk, nextsize); // 判断当前 nextchunk 是否 inuse
+        if (nextchunk != av->top) { // 判断当前 chunk 是否与 top chunk 相邻
+          nextinuse = inuse_bit_at_offset(nextchunk, nextsize); // 判断 nextchunk 是否 inuse
 
           if (!nextinuse) {
             size += nextsize;
-            unlink_chunk(av, nextchunk); // 如果没有使用，将当前 nextchunk 从链表中取出
+            unlink_chunk(av, nextchunk); // 如果没有使用，则证明其并不属于 fastbins 的 chunk,将当前 nextchunk 从其所属链表中取出
           } else
             clear_inuse_bit_at_offset(nextchunk, 0); //如果还有在使用 则将当前 nextchunk 设置为未使用
 
@@ -630,7 +634,7 @@ static void malloc_consolidate(mstate av) {
 
           if (!in_smallbin_range(size)) {
             p->fd_nextsize = NULL;  // large bins 需要考虑 这两个指针赋值
-            p->bk_nextsize = NULL;  // TODO: 后文介绍
+            p->bk_nextsize = NULL;
           }
 
           set_head(p, size | PREV_INUSE); // 设置 p 的 chunk_size 包含 PREV_INUSE 标志
@@ -639,7 +643,7 @@ static void malloc_consolidate(mstate av) {
           set_foot(p, size); // 设置下一块 chunk 的 prev_size 大小
         }
 
-        else {
+        else { // 将此 chunk 与 top 融合
           size += nextsize;
           set_head(p, size | PREV_INUSE);
           av->top = p;
@@ -650,3 +654,5 @@ static void malloc_consolidate(mstate av) {
   } while (fb++ != maxfb); // 便利所有链表
 }
 ```
+
+![malloc_consolidate](./pic/malloc_consolidate.png)
