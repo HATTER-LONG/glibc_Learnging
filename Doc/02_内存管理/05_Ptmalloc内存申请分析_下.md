@@ -9,7 +9,7 @@
 - [参考文章--浅析 largebin attack](https://xz.aliyun.com/t/5177)
 - [参考文章--largebin 学习从源码到做题](https://xz.aliyun.com/t/6596)
 
-前文已经介绍了 `small bin` 以及当其无法满足需求时，需要使用 `large bin`，并且会进行 `fast bin` 的内存合并相关操作，接下来开始分析 `_int_malloc` 中 `large bin` 的分配流程。
+前文已经介绍了 `small bin` 以及当其无法满足需求时，需要使用 `large bin`，并且会进行 `fast bin` 的内存合并相关操作，接下来开始分析 `_int_malloc` 后续的分配流程。
 
 1. 首先判断 tcache 是否存在当前申请的内存块，初始化一些局部变量。
 
@@ -28,14 +28,14 @@
 2. 两个循环，最外层用于无法满足需求用于合并重试，里层遍历所有 unsorted 节点：
 
     ```cpp
-    //这里需要外循环，因为可能直到 malloc 结束时才意识到应该合并，所以必须这样做并重试。这最多发生一次，并且仅在需要扩展内存以服务“小”请求时才发生。
+    //这里需要外循环，因为可能直到 malloc 结束时才意识到应该合并，所以必须这样做并重试。
+    //这最多发生一次，并且仅在需要扩展内存以服务“小”请求时才发生。
     for (;; ) 
-    
         {
         int iters = 0;
         while ((victim = unsorted_chunks (av)->bk) != unsorted_chunks (av)) // 判断 unsorted 不为空
             {
-            bck = victim->bk; //取出下一个空闲的 chunk
+            bck = victim->bk; //取出 unsorted bin 中倒数第二个空闲的 chunk
             size = chunksize (victim);
             mchunkptr next = chunk_at_offset (victim, size);  // 偏移到再下一个 chunk 头 用于检查链表是否正常
 
@@ -101,7 +101,7 @@
             }
     ```
 
-4. 将 victim 从 unsorted list 中移除，
+4. 将 victim 从 unsorted list 中移除，判断是否符合申请的内存大小，如果符合且 tcache 相应链表未满，则先将对应 chunk 放入 tcache 队列中，反之 返回给用户使用。
 
     ```cpp
           /* remove from unsorted list */
