@@ -141,7 +141,7 @@
             }
     ```
 
-5. 当前将遍历道德 unrsored bin 插入对应的 small bin 或者 large bin 中，需要了解一点 large chunk 中有两个特殊的指针，如下：
+5. 当前将遍历到的 unrsored bin 插入对应的 small bin 或者 large bin 中，需要了解一点 large chunk 中有两个特殊的指针，如下：
     - 指针 fd_nextsize : 该指针指向下一个大小更小的 chunk（注意可能不是相邻 chunk）;
     - 指针 bk_nextsize : 该指针指向前一个大小更大的 chunk（注意可能不是相邻 chunk）。
 
@@ -182,7 +182,7 @@
                 }
               else
                 {
-                  // 否则遍历链表 netsize 找到合适位置插入
+                  // 否则遍历链表 nextsize 找到合适位置插入
                   assert (chunk_main_arena (fwd));
                   while ((unsigned long) size < chunksize_nomask (fwd))
                     {
