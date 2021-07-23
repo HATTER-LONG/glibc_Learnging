@@ -365,8 +365,8 @@
          when no chunks have been returned yet is faster than it might look.
        */
         /*
-        当前 index 的 large bin 可能为空导致无法分配， idx 递增开始查找下一个 large bin ,
-        这里使用到了 Binmap 进行索引管理，快速判断那些
+        当前 index 的 large bin 可能为空导致无法分配[(7)小结中有判断]， idx 递增开始查看比当前 bin 的 index 大的 small bin 或 large bin 是否有空闲 chunk 可利用来分配所需的 chunk。
+        这里使用到了 Binmap 进行索引管理，快速判断哪些 bin 有合适的 chunk 块
         */
       ++idx;
       bin = bin_at (av, idx);
