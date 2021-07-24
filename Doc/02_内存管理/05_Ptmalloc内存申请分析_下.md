@@ -542,6 +542,8 @@
     }
     ```
 
+    ![ptmalloc2](./pic/Glibc_int_malloc-_int_malloc.png)
+
 ## `_int_malloc` 之 `sysmalloc`
 
 - [参考文章--申请内存块](https://ctf-wiki.org/pwn/linux/glibc-heap/implementation/malloc/)
@@ -648,7 +650,7 @@
         allocated mmapped regions, try to directly map this request
         rather than expanding top.
     */
-    //mp_.mmap_threshold 阀值
+    //mp_.mmap_threshold 阀值 (128 * 1024)
     if (av == NULL
         || ((unsigned long) (nb) >= (unsigned long) (mp_.mmap_threshold)
         && (mp_.n_mmaps < mp_.n_mmaps_max)))
@@ -763,9 +765,15 @@
     assert ((unsigned long) (old_size) < (unsigned long) (nb + MINSIZE));
     ```
 
-4. 非主分配区情况：
+4. 非主分配区情况，通过 mmap 申请新的 heap header，放入线程的 heap 链表中进行内存扩展。首先获取当前非主分配区 heap header info，：
 
     ```cpp
+    #define heap_for_ptr(ptr) \
+    ((heap_info *) ((unsigned long) (ptr) & ~(HEAP_MAX_SIZE - 1)))
+    #define arena_for_chunk(ptr) \
+    (chunk_main_arena (ptr) ? &main_arena : heap_for_ptr (ptr)->ar_ptr)
+
+    .......
     if (av != &main_arena)
         {
         heap_info *old_heap, *heap;

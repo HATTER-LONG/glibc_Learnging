@@ -538,6 +538,8 @@ __libc_malloc (size_t bytes)
         __atomic_load_n ((mem), __ATOMIC_RELAXED); })
     ```
 
+  ![ptmalloc1](./pic/Glibc_int_malloc-1.png)
+
 ### `_int_malloc` 之 `malloc_consolidate`
 
 - [参考文章--堆漏洞挖掘中的 malloc_consolidate 与 FASTBIN_CONSOLIDATION_THRESHOLD](https://dongshao.blog.csdn.net/article/details/97627411)
