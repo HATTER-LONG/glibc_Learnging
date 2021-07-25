@@ -214,8 +214,7 @@
         */
         // 如果 TRIM_FASTBINS 设置了，就不能把与 top chunk 相邻的 chunk 放入 fastbin 里
         // 默认 #define TRIM_FASTBINS 0，因此默认情况下下面的语句不会执行
-        // 如果当前 chunk 是 fast chunk，并且下一个 chunk 是 top chunk，则不能插入
-        // TODO: why?
+        // 如果当前 chunk 是 fast chunk，并且下一个 chunk 是 top chunk，则不能插入,会尝试合并进 top
         && (chunk_at_offset(p, size) != av->top)
     #endif
         ) {
@@ -438,9 +437,10 @@
     /*
         If the chunk was allocated via mmap, release via munmap().
     */
-    //说明chunk还是通过mmap分配的，就调用munmap_chunk释放它。
     else {
         munmap_chunk (p);
     }
     }
     ```
+
+  ![free pic](./pic/Glibc_int_malloc-free.png)
