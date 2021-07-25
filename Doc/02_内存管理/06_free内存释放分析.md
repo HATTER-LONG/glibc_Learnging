@@ -4,6 +4,10 @@
   - [`__lib_free`](#__lib_free)
   - [`_int_free`](#_int_free)
 
+> 如有错误以及图片不清晰等问题请提交 issue，谢谢～
+>
+> 源路径：[https://github.com/HATTER-LONG/glibc_Learnging]
+
 ## `__lib_free`
 
 - [参考文章--How does LIBC_PROBE macro actually work in Glibc?](https://stackoverflow.com/questions/52219096/how-does-libc-probe-macro-actually-work-in-glibc)
@@ -45,7 +49,6 @@
     field (unlike with regular mmapped chunks).  */
     static mchunkptr dumped_main_arena_start; /* Inclusive.  */ // = 0
     static mchunkptr dumped_main_arena_end;   /* Exclusive.  */ // = 0
-
 
     /* True if the pointer falls into the dumped arena.  Use this after
     chunk_is_mmapped indicates a chunk is mmapped.  
@@ -94,7 +97,7 @@
         }
     ```
 
-3. 非 mmap 则使用 `_int_free` 进行释放:
+3. 非 mmap 则使用 `_int_free` 进行释放：
 
     ```cpp
     else
@@ -138,7 +141,7 @@
         不会影响性能的小安全检查：分配器永远不会在地址空间的末尾回绕。
         因此我们可以排除一些可能偶然出现的尺寸值或者是某些入侵者的“设计”*/
 
-    //  如果当前chunk的大小异常大，或者地址不是按 2SIZE_SZ 对齐，则报错退出
+    //  如果当前 chunk 的大小异常大，或者地址不是按 2SIZE_SZ 对齐，则报错退出
     if (__builtin_expect ((uintptr_t) p > (uintptr_t) -size, 0)
         || __builtin_expect (misaligned_chunk (p), 0))
         malloc_printerr ("free(): invalid pointer");
@@ -214,12 +217,12 @@
         */
         // 如果 TRIM_FASTBINS 设置了，就不能把与 top chunk 相邻的 chunk 放入 fastbin 里
         // 默认 #define TRIM_FASTBINS 0，因此默认情况下下面的语句不会执行
-        // 如果当前 chunk 是 fast chunk，并且下一个 chunk 是 top chunk，则不能插入,会尝试合并进 top
+        // 如果当前 chunk 是 fast chunk，并且下一个 chunk 是 top chunk，则不能插入，会尝试合并进 top
         && (chunk_at_offset(p, size) != av->top)
     #endif
         ) {
-            // 下一个chunk的大小不能小于两倍的SIZE_SZ,并且
-            // 下一个chunk的大小不能大于system_mem， 一般为132k
+            // 下一个 chunk 的大小不能小于两倍的 SIZE_SZ, 并且
+            // 下一个 chunk 的大小不能大于 system_mem， 一般为 132k
             // 如果出现这样的情况，就报错。
         if (__builtin_expect (chunksize_nomask (chunk_at_offset (p, size))
                 <= CHUNK_HDR_SZ, 0)
@@ -250,7 +253,7 @@
         fb = &fastbin (av, idx);
 
         /* Atomically link P to its fastbin: P->FD = *FB; *FB = P;  */
-        // 使用原子操作将P插入到链表中
+        // 使用原子操作将 P 插入到链表中
         mchunkptr old = *fb, old2;
 
         if (SINGLE_THREAD_P)
@@ -270,7 +273,7 @@
             {
                 /* Check that the top of the bin is not the record we are going to
                     add (i.e., double free).  */
-                // 判断fastbin的头chunk是否就是我们将要free的chunk，以防止正常用户的double free(hacker另说)
+                // 判断 fastbin 的头 chunk 是否就是我们将要 free 的 chunk，以防止正常用户的 double free(hacker 另说）
                 if (__builtin_expect (old == p, 0))
                     malloc_printerr ("double free or corruption (fasttop)");
                 old2 = old;
@@ -283,7 +286,7 @@
         size of the chunk that we are adding.  We can dereference OLD
         only if we have the lock, otherwise it might have already been
         allocated again.  */
-         // 如果实际放入的fastbin index与预期的不同，则error
+         // 如果实际放入的 fastbin index 与预期的不同，则 error
         if (have_lock && old != NULL
         && __builtin_expect (fastbin_index (chunksize (old)) != idx, 0))
         malloc_printerr ("invalid fastbin entry (free)");
@@ -291,7 +294,7 @@
     ```
 
 4. 当前 chunk 不在 fastbin 中，也不是通过 mmap 分配得来的：
-    - [参考文章--linux 堆溢出学习之malloc堆管理机制原理详解](https://blog.csdn.net/qq_29343201/article/details/59614863)
+    - [参考文章--linux 堆溢出学习之 malloc 堆管理机制原理详解](https://blog.csdn.net/qq_29343201/article/details/59614863)
 
     ```cpp
     /*
@@ -311,7 +314,7 @@
 
     /* Lightweight tests: check whether the block is already the
        top block.  */
-    // 判断当前chunk是否top chunk
+    // 判断当前 chunk 是否 top chunk
     if (__glibc_unlikely (p == av->top))
       malloc_printerr ("double free or corruption (top)");
     /* Or whether the next chunk is beyond the boundaries of the arena.  */
@@ -359,7 +362,7 @@
     not placed into regular bins until after they have
     been given one chance to be used in malloc.
       */
-    //对fastbin中的chunk进行合并并添加到unsortedbin中
+    //对 fastbin 中的 chunk 进行合并并添加到 unsortedbin 中
       bck = unsorted_chunks(av);
       fwd = bck->fd;
       if (__glibc_unlikely (fwd->bk != bck))
@@ -405,12 +408,12 @@
       is reached.
 
       如果腾出大空间，巩固可能的周围大块。
-      然后，如果总未使用的最高内存超过trim阈值，要求 malloc_trim 减少顶部。
+      然后，如果总未使用的最高内存超过 trim 阈值，要求 malloc_trim 减少顶部。
 
-      除非max_fast为0，否则我们不知道是否有fastbins与顶部接壤，因此我们无法确定阈值是否除非合并 fastbins，否则已经达到。
+      除非 max_fast 为 0，否则我们不知道是否有 fastbins 与顶部接壤，因此我们无法确定阈值是否除非合并 fastbins，否则已经达到。
       但我们不想在每个 free bin 上整合。作为妥协，如果 FASTBIN_CONSOLIDATION_THRESHOLD，则执行合并到达了。 
     */
-    //如果是主分配区，并且主分配区的top chunk大于一定的值，就通过systrim缩小top chunk。如果是非主分配区，就获得top chunk对应的非主分配区的heap_info指针，调用heap_trim尝试缩小该heap。后面来看systrim和heap_trim这两个函数。
+    //如果是主分配区，并且主分配区的 top chunk 大于一定的值，就通过 systrim 缩小 top chunk。如果是非主分配区，就获得 top chunk 对应的非主分配区的 heap_info 指针，调用 heap_trim 尝试缩小该 heap。后面来看 systrim 和 heap_trim 这两个函数。
     if ((unsigned long)(size) >= FASTBIN_CONSOLIDATION_THRESHOLD) {
       if (atomic_load_relaxed (&av->have_fastchunks))
     malloc_consolidate(av);
