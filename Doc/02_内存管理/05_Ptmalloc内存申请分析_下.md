@@ -765,7 +765,12 @@
     assert ((unsigned long) (old_size) < (unsigned long) (nb + MINSIZE));
     ```
 
-4. 非主分配区情况，通过 mmap 申请新的 heap header，放入线程的 heap 链表中进行内存扩展。首先获取当前非主分配区 heap header info，：
+4. 非主分配区情况，通过 mmap 申请新的 heap header，放入线程的 heap 链表中进行内存扩展。首先获取当前非主分配区 heap header info：
+    - 首先判断是否而可以进行 heap 扩展 `grow_heap`，成功则进行标志位更新；
+    - 否则申请新的 heap 使用，`new_heap` 通过 mmap 申请新的 heap 内存；
+    - [参考文章--Glibc内存管理--ptmalloc2源代码分析（二十四）](https://blog.csdn.net/iteye_7858/article/details/82070321?utm_medium=distribute.pc_relevant.none-task-blog-2~default~baidujs_title~default-0.base&spm=1001.2101.3001.4242)
+    - [**参考文章--glibc+malloc源码简析(二)**](https://openeuler.org/zh/blog/wangshuo/glibc+malloc%E6%BA%90%E7%A0%81%E7%AE%80%E6%9E%90(%E4%BA%8C).html)
+    - //TODO: 可以详细解析下 sysmalloc 内存对齐相关细节参考上边这篇文章。
 
     ```cpp
     #define heap_for_ptr(ptr) \
@@ -783,7 +788,7 @@
         old_heap = heap_for_ptr (old_top);
         old_heap_size = old_heap->size;
         if ((long) (MINSIZE + nb - old_size) > 0
-            && grow_heap (old_heap, MINSIZE + nb - old_size) == 0)
+            && grow_heap (old_heap, MINSIZE + nb - old_size) == 0) //grow_heap() 函数主要将 sub_heap 中可读可写区域扩大
             {
             av->system_mem += old_heap->size - old_heap_size;
             set_head (old_top, (((char *) old_heap + old_heap->size) - (char *) old_top)
@@ -793,10 +798,10 @@
             {
             /* Use a newly allocated heap.  */
             heap->ar_ptr = av;
-            heap->prev = old_heap;
-            av->system_mem += heap->size;
+            heap->prev = old_heap; // 更新 heap header info
+            av->system_mem += heap->size; // 更新分配区信息
             /* Set up the new top.  */
-            top (av) = chunk_at_offset (heap, sizeof (*heap));
+            top (av) = chunk_at_offset (heap, sizeof (*heap)); // 更新 top 地址
             set_head (top (av), (heap->size - sizeof (*heap)) | PREV_INUSE);
 
             /* Setup fencepost and free the old top chunk with a multiple of
@@ -804,6 +809,11 @@
             /* The fencepost takes at least MINSIZE bytes, because it might
                 become the top chunk again later.  Note that a footer is set
                 up, too, although the chunk is marked in use. */
+            /*设置fencepost并使用多个的释放旧的顶部块
+                MALLOC_ALIGNMENT 大小。 */
+            /*栅栏柱至少需要 MINSIZE 字节，因为它可能
+                稍后再次成为顶级块。注意设置了页脚
+                也一样，虽然块被标记为使用中。 */ 
             old_size = (old_size - MINSIZE) & ~MALLOC_ALIGN_MASK;
             set_head (chunk_at_offset (old_top, old_size + CHUNK_HDR_SZ),
                 0 | PREV_INUSE);
@@ -890,6 +900,12 @@
                 space is available elsewhere.  Note that we ignore mmap max count
                 and threshold limits, since the space will not be used as a
                 segregated mmap region.
+                如果有 mmap，请尝试在 MORECORE 失败时将其用作备份或
+                不能使用。这对于有“漏洞”的系统来说是值得的
+                地址空间，因此 sbrk 不能扩展以提供连续空间，但是
+                其他地方有空位。请注意，我们忽略了 mmap 最大计数
+                和阈值限制，因为空间不会被用作
+                隔离的 mmap 区域。 
             */
 
             /* Cannot merge with old top, so add its size back in */
@@ -949,7 +965,7 @@
 
             * If the first time through or noncontiguous, we need to call sbrk
                 just to find out where the end of memory lies.
-                如果第一次通过或者不连续，需要调用sbrk只是为了找出记忆的尽头在哪里。
+                如果第一次连续或者不连续，需要调用sbrk只是为了找出内存的尽头在哪里。
 
             * We need to ensure that all returned chunks from malloc will meet
                 MALLOC_ALIGNMENT
@@ -968,7 +984,8 @@
                 所以我们现在分配足够多的内存来达到页面边界，这反过来又会导致未来对页面对齐的连续调用。 
             */
 
-            else
+            else  // 新申请的内存并不连续
+            /*新分配的内存地址大于原来的top chunk的结束地址，但是不连续。这种情况下，如果分配区的连续标志位置位，则表示不是通过MMAP分配的，肯定有其他线程调用了brk在堆上分配了内存，av->system_mem += brk - old_end表示将其他线程分配的内存一并计入到该分配区分配的内存大小。*/
                 {
                 front_misalign = 0;
                 end_misalign = 0;
@@ -1142,3 +1159,5 @@
     return 0;
     }
     ```
+
+![sysmalloc](./pic/Glibc_int_malloc-sysmalloc.png)
