@@ -153,7 +153,6 @@ chunk 大小减去一个 chunk 头大小，在整除 MALLOC_ALIGNMENT(32 位：8
   if (__glibc_unlikely (tcache == NULL)) \
     tcache_init();
 
-
 void *
 __libc_malloc (size_t bytes)
 {
@@ -405,7 +404,7 @@ tcache_get (size_t tc_idx)
 
 > 实例代码：[tcache.cpp](../../test/tcache.cpp)
 
-1. 判断是否支持 tcache，参考 pwndbg 实现:
+1. 判断是否支持 tcache，参考 pwndbg 实现：
 
     ![gdb](./pic/tcache_gdb.png)
 
@@ -429,7 +428,7 @@ tcache_get (size_t tc_idx)
       still works.  */
     /*
     安全链接：
-      使用来自 ASLR (mmap_base) 的随机性来保护单链表Fast-Bins 和 TCache。
+      使用来自 ASLR (mmap_base) 的随机性来保护单链表 Fast-Bins 和 TCache。
       也就是说，屏蔽“下一个”指针列表的块，并对它们执行分配对齐检查。
       这种机制降低了指针劫持的风险，就像在 Small-Bins 双链表中的安全解除链接。
       它假定最小页面大小为 4096 字节（12 位）。系统与较大的页面提供较少的熵，尽管指针重整仍然有效。 

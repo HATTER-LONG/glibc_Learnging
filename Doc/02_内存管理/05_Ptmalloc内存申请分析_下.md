@@ -4,6 +4,10 @@
   - [`_int_malloc` 之 `large bin`](#_int_malloc-之-large-bin)
   - [`_int_malloc` 之 `sysmalloc`](#_int_malloc-之-sysmalloc)
 
+> 如有错误以及图片不清晰等问题请提交 issue，谢谢～
+>
+> 源路径：[https://github.com/HATTER-LONG/glibc_Learnging]
+
 ## `_int_malloc` 之 `large bin`
 
 - [参考文章--浅析 largebin attack](https://xz.aliyun.com/t/5177)
@@ -322,7 +326,7 @@
     ```
 
 8. binmap 中的每一位表示对应的 bin 中是否存在空闲的 chunk，4 个 block 来管理，每个 block 有 4 字节，也就是 128 个 bit。通过 binmap 机制快速查找所有  large bin 所包含的空闲内存是否有符合标准的。
-    - [参考文章--glibc-malloc源码分析](https://a1ex.online/2020/09/28/glibc-malloc%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/)
+    - [参考文章--glibc-malloc 源码分析](https://a1ex.online/2020/09/28/glibc-malloc%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/)
 
     ```cpp
         ////////////////////////////////////////
@@ -365,7 +369,7 @@
          when no chunks have been returned yet is faster than it might look.
        */
         /*
-        当前 index 的 large bin 可能为空导致无法分配[(7)小结中有判断]， idx 递增开始查看比当前 bin 的 index 大的 small bin 或 large bin 是否有空闲 chunk 可利用来分配所需的 chunk。
+        当前 index 的 large bin 可能为空导致无法分配 [(7) 小结中有判断]， idx 递增开始查看比当前 bin 的 index 大的 small bin 或 large bin 是否有空闲 chunk 可利用来分配所需的 chunk。
         这里使用到了 Binmap 进行索引管理，快速判断哪些 bin 有合适的 chunk 块
         */
       ++idx;
@@ -500,7 +504,7 @@
 
         if ((unsigned long) (size) >= (unsigned long) (nb + MINSIZE))
             {
-                //将top chunk 划分
+                //将 top chunk 划分
                 remainder_size = size - nb;
                 remainder = chunk_at_offset (victim, nb);
                 av->top = remainder;
@@ -516,7 +520,7 @@
 
         /* When we are using atomic ops to free fast chunks we can get
             here for all block sizes.  */
-        //如果top chunk不够，则合并fastbin，再次尝试使用 small bin 或者 large bin 进行分配
+        //如果 top chunk 不够，则合并 fastbin，再次尝试使用 small bin 或者 large bin 进行分配
         else if (atomic_load_relaxed (&av->have_fastchunks))
             {
             malloc_consolidate (av);
@@ -530,7 +534,7 @@
         /*
             Otherwise, relay to handle system-dependent cases
         */
-        //如果仍然不够，则调用sysmalloc 继续分配堆块
+        //如果仍然不够，则调用 sysmalloc 继续分配堆块
         else
             {
             void *p = sysmalloc (nb, av);
@@ -558,7 +562,7 @@
     be extended or replaced.
 
     sysmalloc 处理需要更多系统内存的 malloc 情况。
-    进入时，假设 av->top 没有足够的为 nb 字节服务请求的空间，因此需要 av->top延长或更换。 
+    进入时，假设 av->top 没有足够的为 nb 字节服务请求的空间，因此需要 av->top 延长或更换。 
     */
 
     static void *
@@ -581,7 +585,6 @@
     mchunkptr p;                    /* the allocated/returned chunk */
     mchunkptr remainder;            /* remainder from allocation */
     unsigned long remainder_size;   /* its size */
-
 
     size_t pagesize = GLRO (dl_pagesize);
     bool tried_mmap = false;
@@ -637,7 +640,6 @@
 
     Note: The size argument has side effects (expanded multiple times).  */
     #define ALIGN_UP(base, size) ALIGN_DOWN ((base) + (size) - 1, (size))
-
 
     #define MMAP(addr, size, prot, flags) \
     __mmap((addr), (size), (prot), (flags)|MAP_ANONYMOUS|MAP_PRIVATE, -1, 0)
@@ -755,7 +757,7 @@
         If not the first time through, we require old_size to be
         at least MINSIZE and to have prev_inuse set.
     */
-    // 检查 旧堆：1,如果是刚初始化的 top 其size 应该为0; 2,已经分配过的对结束地址应该是页对齐的
+    // 检查 旧堆：1, 如果是刚初始化的 top 其 size 应该为 0; 2, 已经分配过的对结束地址应该是页对齐的
     assert ((old_top == initial_top (av) && old_size == 0) ||
             ((unsigned long) (old_size) >= MINSIZE &&
             prev_inuse (old_top) &&
@@ -768,8 +770,8 @@
 4. 非主分配区情况，通过 mmap 申请新的 heap header，放入线程的 heap 链表中进行内存扩展。首先获取当前非主分配区 heap header info：
     - 首先判断是否而可以进行 heap 扩展 `grow_heap`，成功则进行标志位更新；
     - 否则申请新的 heap 使用，`new_heap` 通过 mmap 申请新的 heap 内存；
-    - [参考文章--Glibc内存管理--ptmalloc2源代码分析（二十四）](https://blog.csdn.net/iteye_7858/article/details/82070321?utm_medium=distribute.pc_relevant.none-task-blog-2~default~baidujs_title~default-0.base&spm=1001.2101.3001.4242)
-    - [**参考文章--glibc+malloc源码简析(二)**](https://openeuler.org/zh/blog/wangshuo/glibc+malloc%E6%BA%90%E7%A0%81%E7%AE%80%E6%9E%90(%E4%BA%8C).html)
+    - [参考文章--Glibc 内存管理--ptmalloc2 源代码分析（二十四）](https://blog.csdn.net/iteye_7858/article/details/82070321?utm_medium=distribute.pc_relevant.none-task-blog-2~default~baidujs_title~default-0.base&spm=1001.2101.3001.4242)
+    - [**参考文章--glibc+malloc 源码简析（二）**](https://openeuler.org/zh/blog/wangshuo/glibc+malloc%E6%BA%90%E7%A0%81%E7%AE%80%E6%9E%90(%E4%BA%8C).html)
     - //TODO: 可以详细解析下 sysmalloc 内存对齐相关细节参考上边这篇文章。
 
     ```cpp
@@ -809,7 +811,7 @@
             /* The fencepost takes at least MINSIZE bytes, because it might
                 become the top chunk again later.  Note that a footer is set
                 up, too, although the chunk is marked in use. */
-            /*设置fencepost并使用多个的释放旧的顶部块
+            /*设置 fencepost 并使用多个的释放旧的顶部块
                 MALLOC_ALIGNMENT 大小。 */
             /*栅栏柱至少需要 MINSIZE 字节，因为它可能
                 稍后再次成为顶级块。注意设置了页脚
@@ -965,7 +967,7 @@
 
             * If the first time through or noncontiguous, we need to call sbrk
                 just to find out where the end of memory lies.
-                如果第一次连续或者不连续，需要调用sbrk只是为了找出内存的尽头在哪里。
+                如果第一次连续或者不连续，需要调用 sbrk 只是为了找出内存的尽头在哪里。
 
             * We need to ensure that all returned chunks from malloc will meet
                 MALLOC_ALIGNMENT
@@ -974,7 +976,7 @@
             * If there was an intervening foreign sbrk, we need to adjust sbrk
                 request size to account for fact that we will not be able to
                 combine new space with existing space in old_top.
-                如果有外部 sbrk 介入，我们需要调整sbrk请求大小以说明我们将无法将新空间与 old_top 中的现有空间结合起来。
+                如果有外部 sbrk 介入，我们需要调整 sbrk 请求大小以说明我们将无法将新空间与 old_top 中的现有空间结合起来。
 
             * Almost all systems internally allocate whole pages at a time, in
                 which case we might as well use the whole last page of request.
@@ -985,7 +987,7 @@
             */
 
             else  // 新申请的内存并不连续
-            /*新分配的内存地址大于原来的top chunk的结束地址，但是不连续。这种情况下，如果分配区的连续标志位置位，则表示不是通过MMAP分配的，肯定有其他线程调用了brk在堆上分配了内存，av->system_mem += brk - old_end表示将其他线程分配的内存一并计入到该分配区分配的内存大小。*/
+            /*新分配的内存地址大于原来的 top chunk 的结束地址，但是不连续。这种情况下，如果分配区的连续标志位置位，则表示不是通过 MMAP 分配的，肯定有其他线程调用了 brk 在堆上分配了内存，av->system_mem += brk - old_end 表示将其他线程分配的内存一并计入到该分配区分配的内存大小。*/
                 {
                 front_misalign = 0;
                 end_misalign = 0;

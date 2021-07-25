@@ -449,7 +449,7 @@ __libc_malloc (size_t bytes)
 
     ```
 
-2. 使用 `bin_at` 得到 `small bin` 的链表头地址:
+2. 使用 `bin_at` 得到 `small bin` 的链表头地址：
 
     ```cpp
     /* addressing -- note that bin_at(0) does not exist */
@@ -626,7 +626,7 @@ static void malloc_consolidate(mstate av) {
 
           if (!nextinuse) {
             size += nextsize;
-            unlink_chunk(av, nextchunk); // 如果没有使用，则证明其并不属于 fastbins 的 chunk,将当前 nextchunk 从其所属链表中取出
+            unlink_chunk(av, nextchunk); // 如果没有使用，则证明其并不属于 fastbins 的 chunk, 将当前 nextchunk 从其所属链表中取出
           } else
             clear_inuse_bit_at_offset(nextchunk, 0); //如果还有在使用 则将当前 nextchunk 设置为未使用
 
