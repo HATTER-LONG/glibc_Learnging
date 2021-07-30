@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdio>
 
+// glibc_2.33
+
 struct malloc_chunk
 {
     size_t mchunk_prev_size; /* Size of previous chunk (if free).  */
@@ -43,3 +45,12 @@ struct malloc_chunk
 /*将想要申请的内存先转化位 chunk size 再求得对应 bins 下标*/
 #define usize2tidx(x) csize2tidx(request2size(x))
 
+/************************* fastbin ******************************/
+
+/* offset 2 to use otherwise unindexable first 2 bins */
+#define fastbin_index(sz) \
+  ((((unsigned int) (sz)) >> (SIZE_SZ == 8 ? 4 : 3)) - 2)
+/* The maximum fastbin request size we support */
+#define MAX_FAST_SIZE     (80 * SIZE_SZ / 4)
+
+#define NFASTBINS  (fastbin_index (request2size (MAX_FAST_SIZE)) + 1)

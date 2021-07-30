@@ -1,5 +1,5 @@
 
-#include "gnu/libc-version.h"
+#include "fastbin.h"
 #include "tcache.h"
 
 #include <cstdio>
@@ -8,5 +8,6 @@
 
 int main(void)
 {
-    tcacheAlloc();
+    tcacheAllocFreeTest();
+    fastBinAllocFreeTest();
 }
