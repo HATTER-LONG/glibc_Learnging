@@ -11,7 +11,7 @@ endif(Catch2_FOUND)
 FILE(GLOB AUTESTSRC 
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 
-set(PROJECTNAME automatedtools_unittests)
+set(PROJECTNAME GlibcDebug)
 
 add_executable(${PROJECTNAME} ${AUTESTSRC})
 target_link_libraries(${PROJECTNAME} PRIVATE ${LOCAL_LINK_LIB})

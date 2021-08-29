@@ -1,8 +1,8 @@
 
 #include "ThreadPool.h"
+#include "assert.h"
 #include "fastbin.h"
 #include "tcache.h"
-#include "assert.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -18,6 +18,7 @@ int main(void)
 {
     tcacheAllocFreeTest();
     fastBinAllocFreeTest();
-    ThreadPool thread(1);
+    ThreadPool thread(2);
+    thread.enqueue(allocThreadMem);
     thread.enqueue(allocThreadMem);
 }
