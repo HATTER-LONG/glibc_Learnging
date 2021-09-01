@@ -13,21 +13,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_definitions(-Wall -pedantic)
 
 if(CMAKE_BUILD_TYPE MATCHES "Debug" OR CMAKE_BUILD_TYPE MATCHES "RelWithDebInfo")
-    add_definitions(-O0 -Wall -g2)#-fno-limit-debug-info 
+    add_definitions(-O0 -Wall -g2)#-fno-limit-debug-info
 endif()
 set(CMAKE_THREAD_LIBS_INIT "-lpthread")
 find_package(Threads)
 
 set(LOCAL_LINK_LIB pthread)
 
-find_package(spdlog QUIET CONFIG)
+#find_package(spdlog QUIET CONFIG)
 if(spdlog_FOUND)
     list(APPEND LOCAL_LINK_LIB spdlog::spdlog)
 else()
     include_directories(Lib/spdlog)
 endif()
 
-find_package(nlohmann_json QUIET CONFIG)
+#find_package(nlohmann_json QUIET CONFIG)
 if(nlohmann_json_FOUND)
     list(APPEND LOCAL_LINK_LIB nlohmann_json::nlohmann_json)
 else()
