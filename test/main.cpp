@@ -21,4 +21,6 @@ int main(void)
     ThreadPool thread(2);
     thread.enqueue(allocThreadMem);
     thread.enqueue(allocThreadMem);
+
+    return 0;
 }

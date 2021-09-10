@@ -21,6 +21,8 @@
       - [内存结构单元 chunk](#内存结构单元-chunk)
       - [特殊 bins 类型](#特殊-bins-类型)
       - [NONCONTIGUOUS_BIT](#noncontiguous_bit)
+  - [Tcache 管理](#tcache-管理)
+    - [计算 Chunk](#计算-chunk)
 
 ## 前言
 
@@ -1123,30 +1125,117 @@ struct malloc_chunk {
 - set_noncontiguous(M)：将 bit1 标志位置 1，表示 MORCORE 返回非连续虚拟地址空间。
 - set_contiguous(M)：将 bit1 标志位置 0，表示 MORCORE 返回连续虚拟地址空间。
 
+## Tcache 管理
 
+继初始化流程结束，将正式开始内存分配的流程，本节将开始分析 tcache 管理方法。
 
+```cpp
+void *
+__libc_malloc (size_t bytes)
+{
 
+.........
 
+#if USE_TCACHE
+  /* int_free also calls request2size, be careful to not pad twice.  */
+  size_t tbytes;
+  if (!checked_request2size (bytes, &tbytes))
+    {
+      __set_errno (ENOMEM);
+      return NULL;
+    }
+  size_t tc_idx = csize2tidx (tbytes);
 
+  MAYBE_INIT_TCACHE ();
 
+  DIAG_PUSH_NEEDS_COMMENT;
+  if (tc_idx < mp_.tcache_bins
+      && tcache
+      && tcache->counts[tc_idx] > 0)
+    {
+      victim = tcache_get (tc_idx);
+      return TAG_NEW_USABLE (victim);
+    }
+  DIAG_POP_NEEDS_COMMENT;
+#endif
 
+.......
+}
+```
 
+### 计算 Chunk
 
+tcache 也是使用类似 bins 的方式管理 tcache 内存，首先是通过申请的内存大小计算所需的 chunk，及 `checked_request2size` 接口，源码如下：
 
+```cpp
 
+/* MALLOC_ALIGNMENT is the minimum alignment for malloc'ed chunks.  It
+   must be a power of two at least 2 * SIZE_SZ, even on machines for
+   which smaller alignments would suffice. It may be defined as larger
+   than this though. Note however that code and data structures are
+   optimized for the case of 8-byte alignment.  */
+#define MALLOC_ALIGNMENT (2 * SIZE_SZ < __alignof__ (long double) \
+                        ? __alignof__ (long double) : 2 * SIZE_SZ)
 
+/* The corresponding bit mask value.  */
+#define MALLOC_ALIGN_MASK (MALLOC_ALIGNMENT - 1)
 
+/* The smallest possible chunk */
+#define MIN_CHUNK_SIZE        (offsetof(struct malloc_chunk, fd_nextsize))
 
+/* The smallest size we can malloc is an aligned minimal chunk */
+#define MINSIZE  \
+  (unsigned long)(((MIN_CHUNK_SIZE+MALLOC_ALIGN_MASK) & ~MALLOC_ALIGN_MASK))
 
+#ifndef INTERNAL_SIZE_T
+# define INTERNAL_SIZE_T size_t
+#endif
 
+/* The corresponding word size.  */
+#define SIZE_SZ (sizeof (INTERNAL_SIZE_T))
 
+#define request2size(req)                                         \
+  (((req) + SIZE_SZ + MALLOC_ALIGN_MASK < MINSIZE)  ?             \
+   MINSIZE :                                                      \
+   ((req) + SIZE_SZ + MALLOC_ALIGN_MASK) & ~MALLOC_ALIGN_MASK)
 
+/* Check if REQ overflows when padded and aligned and if the resulting value
+   is less than PTRDIFF_T.  Returns TRUE and the requested size or MINSIZE in
+   case the value is less than MINSIZE on SZ or false if any of the previous
+   check fail.  */
+static inline bool
+checked_request2size (size_t req, size_t *sz) __nonnull (1)
+{
+  if (__glibc_unlikely (req > PTRDIFF_MAX))
+    return false;
+  *sz = request2size (req);
+  return true;
+}
+```
 
+> 注意 `__nonnull` 表示入参不应为 null，如果显示传入了 null，编译期会报警告。
 
+首先判断请求大小是否溢出，调用这次的主角 `request2size` 计算需要分配的 chunk 大小，计算的方式为用户申请的长度（req) + Chunk 头（SIZE_SZ），一般 SIZE_SZ 为 size_t 及 32 位 4 字节、64 位 8 字节。
 
+> 当一个 chunk 为空闲时，至少要有 prev_size、size、fd 和 bk 四个参数，因此 MINSIZE 就代表了这四个参数需要占用的内存大小；而当一个 chunk 被使用时，prev_size 可能会被前一个 chunk 用来存储，而当前 chunk 也可以使用下一个 chunk 的 prev_size，互相抵消；fd 和 bk 也会被当作内存存储数据，因此当 chunk 被使用时，只剩下了 size 参数需要设置，request2size 中的 SIZE_SZ 就是 INTERNAL_SIZE_T 类型的大小，因此至少需要 req + SIZE_SZ 的内存大小。MALLOC_ALIGN_MASK 用来对齐，至此 request2size 就计算出了所需的 chunk 的大小。
 
+- 以 64 位系统举例：
 
-    0x7ffff7a5e000     0x7ffff7a84000 r--p    26000 0      /home/layton/Tools/glibc-debug/usr/lib/libc-2.33.so
- 这种成为 backlog 当用到对应虚拟地址时会自动映射对应的文件内存
+  - 申请 24 字节堆块为例，24 + chunk 头 = 32 (100000)，接下来加上 MALLOC_ALIGN_MASK 01111 (101111) 最后 MALLOC_ALIGN_MASK 取反 10000，按位与的结果就是 100000 了，即 32。
 
- 而像有的地址后边没有文件，这就是匿名内存空间，它不会关心映射的文件加载，仅仅是提供虚拟内存给程序使用。
+  - 申请 25 字节堆块，25 + chunk 头 = 33 (100001)，加上 MALLOC_ALIGN_MASK 01111 (110000) 接下来按位与上 ~MALLOC_ALIGN_MASK (10000) 结果为 110000 及 48。
+
+至此也就获得了所需的 chunk 大小，接下来就需要通过 `csize2tidx` 获得所需 chunk 所在的 bin 索引下标：
+
+```cpp
+/* When "x" is from chunksize().  */
+# define csize2tidx(x) (((x) - MINSIZE + MALLOC_ALIGNMENT - 1) / MALLOC_ALIGNMENT
+```
+
+chunk 大小减去一个 chunk 头大小，在整除 MALLOC_ALIGNMENT(32 位：8, 64 位：16)，当前看起来是以某种固定大小进行递增的数组，类似 ptmalloc bins 管理内存一样以递增的方式对应不同的 bins。
+
+- 想要具体了解怎么进行的查找需要先了解几个方面：
+  1. Tcache 如何管理内存的？
+  2. Tcache 如何进行初始化？
+  3. Tcache 如何进行插入获取操作？
+
