@@ -44,6 +44,9 @@
 本文主要介绍 glibc 默认的内存分配器 Ptmalloc 的相关实现细节，希望可以帮助你建立印象中的内存模型，在问题调试、内存优化中不再过于束手无策。
 
 > 文中使用的 glibc 版本为 [2.33（Released 2021-02-01）](https://www.gnu.org/software/libc/)
+>
+> 由于本人水平有限如有错误以及图片不清晰等问题请即时指出或在 [github 仓库](https://github.com/HATTER-LONG/glibc_Learnging) 提交 issue，谢谢～
+>
 
 ## 如何调试 glibc
 
@@ -199,9 +202,9 @@ gdb> set substitute-path  /build/glibc-eX1tMB/glibc-2.31 /home/layton/Tools/glib
             libm.so.6 => /home/layton/Tools/glibc-debug/usr/lib/libm.so.6 (0x00007fa69e28a000)
     ```
 
-6. 最后使用 gdb 启动程序，可以正常使用 [pwndbg 插件](https://github.com/pwndbg/pwndbg)打印内存信息以及 thread_arena 线程分配区：
+6. 最后使用 gdb 启动程序，可以正常使用 [pwndbg 插件](https://github.com/pwndbg/pwndbg)打印内存信息以及 thread_arena 线程分配区，如下图所示：
 
-    ![01](./total/01.png)
+    <img src="./total/01.png" alt="01" style="zoom:50%;" />
 
 ## 进程内存布局
 
@@ -215,13 +218,21 @@ Linux ELF 格式可执行程序的结构是以段（segment）为单位组合而
 >
 > segment 则是执行视图，程序执行是以 segment 为单位载入，每个 segment 对应 ELF 文件中 program header table 中的一个条目，用来建立可执行文件的进程映像。通常说的，代码段、数据段是 segment，目标代码中的 section 会被链接器组织到可执行文件的各个 segment 中。可以使用 readelf -l a.out 查看 ELF 格式执行文件的 segment 信息。
 
-![01](./pic/01.png)
+- 下图中展示了链接视图与执行视图的区别：
 
-![02](./pic/02.png)
+  <img src="./pic/01.png" alt="01" style="zoom:60%;" />
 
-![03](./pic/02_3.png)
+实际程序通过 readelf 查看 Linking View 与 Execution View：
 
-如上图 segment 所示，TYPE 为 LOAD 的段是运行时所需载入的：
+- Linking View：
+
+  ![02](./pic/02.png)
+
+- Execution View：
+
+  ![03](./pic/02_3.png)
+
+如上图 Execution View 中 segment 信息所示，TYPE 为 LOAD 的段是运行时所需载入的：
 
 ```shell
 LOAD           0x0000000000002000 0x0000000000002000 0x0000000000002000
@@ -3322,13 +3333,13 @@ static void malloc_consolidate(mstate av) {
     ((heap_info *) ((unsigned long) (ptr) & ~(HEAP_MAX_SIZE - 1)))
     #define arena_for_chunk(ptr) \
     (chunk_main_arena (ptr) ? &main_arena : heap_for_ptr (ptr)->ar_ptr)
-
+    
     .......
     if (av != &main_arena)
         {
         heap_info *old_heap, *heap;
         size_t old_heap_size;
-
+    
         /* First try to extend the current heap. */
         old_heap = heap_for_ptr (old_top);
         old_heap_size = old_heap->size;
@@ -3348,7 +3359,7 @@ static void malloc_consolidate(mstate av) {
             /* Set up the new top.  */
             top (av) = chunk_at_offset (heap, sizeof (*heap)); // 更新 top 地址
             set_head (top (av), (heap->size - sizeof (*heap)) | PREV_INUSE);
-
+    
             /* Setup fencepost and free the old top chunk with a multiple of
                 MALLOC_ALIGNMENT in size. */
             /* The fencepost takes at least MINSIZE bytes, because it might
@@ -3389,40 +3400,40 @@ static void malloc_consolidate(mstate av) {
         { /* Request enough space for nb + pad + overhead */
         // 计算可以满足请求的内存大小
         size = nb + mp_.top_pad + MINSIZE;
-
+    
         /*
             If contiguous, we can subtract out existing space that we hope to
             combine with new space. We add it back later only if
             we don't actually get contiguous space.
-
+    
             如果是连续的可以复用 old top 的内存
         */
-
+    
         if (contiguous (av))
             size -= old_size;
-
+    
         /*
             Round to a multiple of page size.
             If MORECORE is not contiguous, this ensures that we only call it
             with whole-page arguments.  And if MORECORE is contiguous and
             this is not first time through, this preserves page-alignment of
             previous calls. Otherwise, we correct to page-align below.
-
+    
             四舍五入为页面大小的倍数。如果 MORECORE 不连续，这确保我们只调用它使用整页参数。
             如果 MORECORE 是连续的并且这不是第一次通过，这保留了页面对齐以前的电话。
             否则，我们更正下面的页面对齐。
         */
-
+    
         size = ALIGN_UP (size, pagesize);
-
+    
         /*
             Don't try to call MORECORE if argument is so big as to appear
             negative. Note that since mmap takes size_t arg, it may succeed
             below even if we cannot call MORECORE.
-
+    
             尝试申请内存使用 sbrk
         */
-
+    
         if (size > 0)
             {
             brk = (char *) (MORECORE (size));
@@ -3452,28 +3463,28 @@ static void malloc_consolidate(mstate av) {
                 和阈值限制，因为空间不会被用作
                 隔离的 mmap 区域。 
             */
-
+    
             /* Cannot merge with old top, so add its size back in */
             if (contiguous (av))
                 size = ALIGN_UP (size + old_size, pagesize);
-
+    
             /* If we are relying on mmap as backup, then use larger units */
             if ((unsigned long) (size) < (unsigned long) (MMAP_AS_MORECORE_SIZE))
                 size = MMAP_AS_MORECORE_SIZE;
-
+    
             /* Don't try if size wraps around 0 */
             if ((unsigned long) (size) > (unsigned long) (nb))
                 {
                 char *mbrk = (char *) (MMAP (0, size,
                         MTAG_MMAP_FLAGS | PROT_READ | PROT_WRITE,
                         0));
-
+    
                 if (mbrk != MAP_FAILED)
                     {
                     /* We do not need, and cannot use, another sbrk call to find end */
                     brk = mbrk;
                     snd_brk = brk + size;
-
+    
                     /*
                         Record that we no longer have a contiguous sbrk region.
                         After the first time mmap is used as backup, we do not
@@ -3484,43 +3495,43 @@ static void malloc_consolidate(mstate av) {
                     }
                 }
             }
-
+    
         // 当内存分配成功后
         if (brk != (char *) (MORECORE_FAILURE))
             {
             if (mp_.sbrk_base == 0)
                 mp_.sbrk_base = brk;
             av->system_mem += size;
-
+    
             /*
                 If MORECORE extends previous space, we can likewise extend top size.
                 空间是连续的，则可以尝试进行扩张 old top
             */
-
+    
             if (brk == old_end && snd_brk == (char *) (MORECORE_FAILURE))
                 set_head (old_top, (size + old_size) | PREV_INUSE);
-
+    
             // 意外的已申请内存被耗尽
             else if (contiguous (av) && old_size && brk < old_end)
             /* Oops!  Someone else killed our space..  Can't touch anything.  */
             malloc_printerr ("break adjusted to free malloc space");
-
+    
             /*
                 Otherwise, make adjustments:
-
+    
             * If the first time through or noncontiguous, we need to call sbrk
                 just to find out where the end of memory lies.
                 如果第一次连续或者不连续，需要调用 sbrk 只是为了找出内存的尽头在哪里。
-
+    
             * We need to ensure that all returned chunks from malloc will meet
                 MALLOC_ALIGNMENT
                 我们需要确保所有从 malloc 返回的块都会满足 MALLOC_ALIGNMENT
-
+    
             * If there was an intervening foreign sbrk, we need to adjust sbrk
                 request size to account for fact that we will not be able to
                 combine new space with existing space in old_top.
                 如果有外部 sbrk 介入，我们需要调整 sbrk 请求大小以说明我们将无法将新空间与 old_top 中的现有空间结合起来。
-
+    
             * Almost all systems internally allocate whole pages at a time, in
                 which case we might as well use the whole last page of request.
                 So we allocate enough more memory to hit a page boundary now,
@@ -3528,7 +3539,7 @@ static void malloc_consolidate(mstate av) {
                 几乎所有系统都在内部一次分配整个页面，在在这种情况下，我们不妨使用请求的整个最后一页。
                 所以我们现在分配足够多的内存来达到页面边界，这反过来又会导致未来对页面对齐的连续调用。 
             */
-
+    
             else  // 新申请的内存并不连续
             /*新分配的内存地址大于原来的 top chunk 的结束地址，但是不连续。这种情况下，如果分配区的连续标志位置位，则表示不是通过 MMAP 分配的，肯定有其他线程调用了 brk 在堆上分配了内存，av->system_mem += brk - old_end 表示将其他线程分配的内存一并计入到该分配区分配的内存大小。*/
                 {
@@ -3536,16 +3547,16 @@ static void malloc_consolidate(mstate av) {
                 end_misalign = 0;
                 correction = 0;
                 aligned_brk = brk;
-
+    
                 /* handle contiguous cases 处理连续内存 */
                 if (contiguous (av))
                     {
                     /* Count foreign sbrk as system_mem.  */
                     if (old_size)
                         av->system_mem += brk - old_end;
-
+    
                     /* Guarantee alignment of first new chunk made from this space */
-
+    
                     front_misalign = (INTERNAL_SIZE_T) chunk2rawmem (brk) & MALLOC_ALIGN_MASK;
                     if (front_misalign > 0)
                         {
@@ -3556,35 +3567,35 @@ static void malloc_consolidate(mstate av) {
                             prev_inuse of av->top (and any chunk created from its start)
                             is always true after initialization.
                         */
-
+    
                         correction = MALLOC_ALIGNMENT - front_misalign;
                         aligned_brk += correction;
                         }
-
+    
                     /*
                         If this isn't adjacent to existing space, then we will not
                         be able to merge with old_top space, so must add to 2nd request.
                     */
-
+    
                     correction += old_size;
-
+    
                     /* Extend the end address to hit a page boundary */
                     end_misalign = (INTERNAL_SIZE_T) (brk + size + correction);
                     correction += (ALIGN_UP (end_misalign, pagesize)) - end_misalign;
-
+    
                     assert (correction >= 0);
                     snd_brk = (char *) (MORECORE (correction));
-
+    
                     /*
                         If can't allocate correction, try to at least find out current
                         brk.  It might be enough to proceed without failing.
-
+    
                         Note that if second sbrk did NOT fail, we assume that space
                         is contiguous with first sbrk. This is a safe assumption unless
                         program is multithreaded but doesn't use locks and a foreign sbrk
                         occurred between our first and second calls.
                     */
-
+    
                     if (snd_brk == (char *) (MORECORE_FAILURE))
                         {
                         correction = 0;
@@ -3598,7 +3609,7 @@ static void malloc_consolidate(mstate av) {
                             (*hook)();
                         }
                     }
-
+    
                 /* handle non-contiguous cases 处理不连续内存 */
                 else
                     {
@@ -3617,25 +3628,25 @@ static void malloc_consolidate(mstate av) {
                                 prev_inuse of av->top (and any chunk created from its start)
                                 is always true after initialization.
                             */
-
+    
                             aligned_brk += MALLOC_ALIGNMENT - front_misalign;
                             }
                         }
-
+    
                     /* Find out current end of memory */
                     if (snd_brk == (char *) (MORECORE_FAILURE))
                         {
                         snd_brk = (char *) (MORECORE (0));
                         }
                     }
-
+    
                 /* Adjust top based on results of second sbrk 根据第二个 sbrk 的结果调整顶部*/
                 if (snd_brk != (char *) (MORECORE_FAILURE))
                     {
                     av->top = (mchunkptr) aligned_brk;
                     set_head (av->top, (snd_brk - aligned_brk + correction) | PREV_INUSE);
                     av->system_mem += correction;
-
+    
                     /*
                         If not the first time through, we either have a
                         gap due to foreign sbrk or a non-contiguous region.  Insert a
@@ -3644,7 +3655,7 @@ static void malloc_consolidate(mstate av) {
                         marked as inuse and are in any case too small to use.  We need
                         two to make sizes and alignments work out.
                     */
-
+    
                     if (old_size != 0)
                         {
                         /*
@@ -3654,7 +3665,7 @@ static void malloc_consolidate(mstate av) {
                         */
                         old_size = (old_size - 2 * CHUNK_HDR_SZ) & ~MALLOC_ALIGN_MASK;
                         set_head (old_top, old_size | PREV_INUSE);
-
+    
                         /*
                             Note that the following assignments completely overwrite
                             old_top when old_size was previously MINSIZE.  This is
@@ -3666,7 +3677,7 @@ static void malloc_consolidate(mstate av) {
                 set_head (chunk_at_offset (old_top,
                             old_size + CHUNK_HDR_SZ),
                     CHUNK_HDR_SZ | PREV_INUSE);
-
+    
                         /* If possible, release the rest. 
                         需要注意的是，在这里程序将旧的 top chunk 进行了释放，那么其会根据大小进入不同的 bin 或 tcache 中。*/
                         if (old_size >= MINSIZE)
@@ -3682,11 +3693,11 @@ static void malloc_consolidate(mstate av) {
     if ((unsigned long) av->system_mem > (unsigned long) (av->max_system_mem))
         av->max_system_mem = av->system_mem;
     check_malloc_state (av);
-
+    
     /* finally, do the allocation 分配内存块*/
     p = av->top;
     size = chunksize (p);
-
+    
     /* check that one of the above allocation paths succeeded 切分 TOP*/
     if ((unsigned long) (size) >= (unsigned long) (nb + MINSIZE))
         {
@@ -3698,7 +3709,7 @@ static void malloc_consolidate(mstate av) {
         check_malloced_chunk (av, p, nb);
         return chunk2mem (p);
         }
-
+    
     /* catch all failure paths */
     __set_errno (ENOMEM);
     return 0;
@@ -3804,11 +3815,11 @@ static void malloc_consolidate(mstate av) {
     else
         {
         MAYBE_INIT_TCACHE ();
-
+    
         ar_ptr = arena_for_chunk (p);
         _int_free (ar_ptr, p, 0);
         }
-
+    
     __set_errno (err);
     }
     ```
@@ -3997,18 +4008,18 @@ static void malloc_consolidate(mstate av) {
     /*
         Consolidate other non-mmapped chunks as they arrive.
     */
-
+    
     else if (!chunk_is_mmapped(p)) {
-
+    
         /* If we're single-threaded, don't lock the arena.  */
     if (SINGLE_THREAD_P)
       have_lock = true;
-
+    
     if (!have_lock)
       __libc_lock_lock (av->mutex);
-
+    
     nextchunk = chunk_at_offset(p, size);
-
+    
     /* Lightweight tests: check whether the block is already the
        top block.  */
     // 判断当前 chunk 是否 top chunk
@@ -4024,15 +4035,15 @@ static void malloc_consolidate(mstate av) {
     //或者块是否实际上没有被标记为使用。
     if (__glibc_unlikely (!prev_inuse(nextchunk)))
       malloc_printerr ("double free or corruption (!prev)");
-
+    
     // 判断下一块 chunksize 是否正常
     nextsize = chunksize(nextchunk);
     if (__builtin_expect (chunksize_nomask (nextchunk) <= CHUNK_HDR_SZ, 0)
     || __builtin_expect (nextsize >= av->system_mem, 0))
       malloc_printerr ("free(): invalid next size (normal)");
-
+    
     free_perturb (chunk2mem(p), size - CHUNK_HDR_SZ);
-
+    
     /* consolidate backward  向后合并*/
     if (!prev_inuse(p)) {
       prevsize = prev_size (p);
@@ -4042,18 +4053,18 @@ static void malloc_consolidate(mstate av) {
         malloc_printerr ("corrupted size vs. prev_size while consolidating");
       unlink_chunk (av, p);
     }
-
+    
     if (nextchunk != av->top) {
       /* get and clear inuse bit */
       nextinuse = inuse_bit_at_offset(nextchunk, nextsize);
-
+    
       /* consolidate forward 向前合并*/
       if (!nextinuse) {
     unlink_chunk (av, nextchunk);
     size += nextsize;
       } else
     clear_inuse_bit_at_offset(nextchunk, 0); //清空使用标志位
-
+    
       /*
     Place the chunk in unsorted chunk list. Chunks are
     not placed into regular bins until after they have
@@ -4073,40 +4084,40 @@ static void malloc_consolidate(mstate av) {
     }
       bck->fd = p;
       fwd->bk = p;
-
+    
       set_head(p, size | PREV_INUSE);
       set_foot(p, size);
-
+    
       check_free_chunk(av, p);
     }
-
+    
     /*
       If the chunk borders the current high end of memory,
       consolidate into top
     */
-
+    
     else {
       size += nextsize;
       set_head(p, size | PREV_INUSE);
       av->top = p;
       check_chunk(av, p);
     }
-
+    
     /*
       If freeing a large space, consolidate possibly-surrounding
       chunks. Then, if the total unused topmost memory exceeds trim
       threshold, ask malloc_trim to reduce top.
-
+    
       Unless max_fast is 0, we don't know if there are fastbins
       bordering top, so we cannot tell for sure whether threshold
       has been reached unless fastbins are consolidated.  But we
       don't want to consolidate on each free.  As a compromise,
       consolidation is performed if FASTBIN_CONSOLIDATION_THRESHOLD
       is reached.
-
+    
       如果腾出大空间，巩固可能的周围大块。
       然后，如果总未使用的最高内存超过 trim 阈值，要求 malloc_trim 减少顶部。
-
+    
       除非 max_fast 为 0，否则我们不知道是否有 fastbins 与顶部接壤，因此我们无法确定阈值是否除非合并 fastbins，否则已经达到。
       但我们不想在每个 free bin 上整合。作为妥协，如果 FASTBIN_CONSOLIDATION_THRESHOLD，则执行合并到达了。 
     */
@@ -4114,7 +4125,7 @@ static void malloc_consolidate(mstate av) {
     if ((unsigned long)(size) >= FASTBIN_CONSOLIDATION_THRESHOLD) {
       if (atomic_load_relaxed (&av->have_fastchunks))
     malloc_consolidate(av);
-
+    
       if (av == &main_arena) {
     #ifndef MORECORE_CANNOT_TRIM
         if ((unsigned long)(chunksize(av->top)) >=
@@ -4125,12 +4136,12 @@ static void malloc_consolidate(mstate av) {
         /* Always try heap_trim(), even if the top chunk is not
         large, because the corresponding heap might go away.  */
         heap_info *heap = heap_for_ptr(top(av));
-
+    
         assert(heap->ar_ptr == av);
         heap_trim(heap, mp_.top_pad);
         }
         }
-
+    
         if (!have_lock)
         __libc_lock_unlock (av->mutex);
     }
