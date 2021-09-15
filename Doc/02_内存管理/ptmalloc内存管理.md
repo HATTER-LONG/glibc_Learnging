@@ -37,7 +37,7 @@
       - [_int_malloc 之 sysmalloc](#_int_malloc-之-sysmalloc)
   - [free 内存释放](#free-内存释放)
     - [__lib_free](#__lib_free)
-  - [`_int_free`](#_int_free)
+  - [_int_free](#_int_free)
 
 ## 前言
 
@@ -319,11 +319,11 @@ Linux 支持不同的可执行程序，其内核使用 `struct linux_binfmt` 来
 
 - 32 位 flexible layout。
 
-    ![03](pic/03.png)
+    <img src="pic/03.png" alt="03" style="zoom: 60%;" />
 
 - 64 位 legacy layout。
 
-    ![04](pic/04.png)
+    <img src="pic/04.png" alt="04" style="zoom:65%;" />
 
 ## ptmalloc 内存管理数据结构
 
@@ -348,31 +348,21 @@ strong_alias (__libc_malloc, __malloc) strong_alias (__libc_malloc, malloc)
 
 我们先从 `__libc_malloc` 入口开始分析：
 
-```c
+```cpp
 void *weak_variable (*__malloc_hook)
     (size_t __size, const void *) = malloc_hook_ini;
 
 # if __WORDSIZE == 64
 #  define SIZE_MAX  (18446744073709551615UL)
 # else
-#  if __WORDSIZE32_SIZE_ULONG
-#   define SIZE_MAX  (4294967295UL)
-#  else
-#   define SIZE_MAX  (4294967295U)
-#  endif
+# ............
 # endif
 
 # if __WORDSIZE == 64
 #  define PTRDIFF_MIN  (-9223372036854775807L-1)
 #  define PTRDIFF_MAX  (9223372036854775807L)
 # else
-#  if __WORDSIZE32_PTRDIFF_LONG
-#   define PTRDIFF_MIN  (-2147483647L-1)
-#   define PTRDIFF_MAX  (2147483647L)
-#  else
-#   define PTRDIFF_MIN  (-2147483647-1)
-#   define PTRDIFF_MAX  (2147483647)
-#  endif
+# ............
 # endif
 
 ..................
@@ -416,7 +406,7 @@ malloc_hook_ini (size_t sz, const void *caller)
 ```
 
 1. 第一步先将 `__malloc_hook` 置为 NULL。
-2. 调用 `ptmalloc_init` 后，又重新调用了 `__libc_malloc`，配合前边 `__libc_malloc` 中判断 hook 是否为空就是为这时准备的，由于 hook 在第一次 malloc 调用后就被置 NULL 了，正符合了 __libc_malloc 中判断时 `__builtin_expect` 所期望也就是 false。
+2. 调用 `ptmalloc_init` 后，又重新调用了 `__libc_malloc`，配合前边 `__libc_malloc` 中判断 hook 是否为空就是为这时准备的，由于 hook 在第一次 malloc 调用后就被置 NULL 了，此时正符合了 __libc_malloc 中判断时 `__builtin_expect` 所期望也就是 false。
 
 #### ptmalloc_init
 
@@ -556,7 +546,7 @@ malloc_init_state (mstate av)
 
 再次调用的流程。
 
-![第二次调用](./pic/09.png)
+<img src="./pic/09.png" alt="第二次调用" style="zoom:67%;" />
 
 ### Q/A
 
@@ -3824,7 +3814,7 @@ static void malloc_consolidate(mstate av) {
     }
     ```
 
-## `_int_free`
+## _int_free
 
 1. 安全检查：
 
