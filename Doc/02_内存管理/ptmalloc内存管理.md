@@ -38,6 +38,7 @@
   - [free 内存释放](#free-内存释放)
     - [__lib_free](#__lib_free)
   - [_int_free](#_int_free)
+  - [参考文章](#参考文章)
 
 ## 前言
 
@@ -785,9 +786,11 @@ malloc_init_state (mstate av)
     #endif
     ```
 
-    ![fastbin](./pic/fastbinstruct.png)
+   - 下图描述了 fast bin 与 chunk 的数据结构：
 
-4. `unsorted bin`：是 bins 的一个缓冲区，bins 数组下标为 1 的即是 unstored bin。当用户释放的内存大于 max_fast 或者 fast bins 合并后的 chunk 都会进入 unsorted bin 上。这使得分配器可以重新使用最近 free 掉的 chunk，从而消除了寻找合适 bin 的时间开销，进而加速了内存分配及释放的效率。当用户 malloc 的时候，如果 fast bins 以及 small bins 都无法满足需求后，首先通过 malloc_consolidate 进行合并 fast bins 到 unsorted bin 上，在使用 large bins 进行分配前，会遍历整个 unsorted bin 将其管理的 chunk 按照大小标准插入到 small bins 或者 large bins 中，再尝试分配。//TODO：增加实践验证！！！
+      ![fastbin](./pic/fastbinstruct.png)
+
+4. `unsorted bin`：是 bins 的一个缓冲区，bins 数组下标为 1 的即是 unstored bin。当用户释放的内存大于 max_fast 或者 fast bins 合并后的 chunk 都会进入 unsorted bin 上。这使得分配器可以重新使用最近 free 掉的 chunk，从而消除了寻找合适 bin 的时间开销，进而加速了内存分配及释放的效率。当用户 malloc 的时候，如果 fast bins 以及 small bins 都无法满足需求后，首先通过 malloc_consolidate 进行合并 fast bins 到 unsorted bin 上，在使用 large bins 进行分配前，会遍历整个 unsorted bin 将其管理的 chunk 按照大小标准插入到 small bins 或者 large bins 中，再尝试分配。
    - unsorted bin 是双向链表管理，用于保存 free chunk。对于 chunk 大小无限制，除开小于 max_fast 的都会插入到这里。
 
     ```cpp
@@ -808,6 +811,8 @@ malloc_init_state (mstate av)
     #define unsorted_chunks(M)          (bin_at (M, 1))
    
     ```
+
+   - 下图描述了 bins 与 chunk 的数据结构关系：
 
     ![unsorted_struct](./pic/unsorted_struct.png)
 
@@ -985,15 +990,22 @@ malloc_init_state (mstate av)
     
     ```
 
-    ![large_bin](./pic/LargeBinStruct.png)
+- large bin 的 chunk 结构：
+
+    <img src="./pic/LargeBinStruct.png" alt="large_bin" style="zoom:67%;" />
+
+  - 验证：
+
     ![binsStruct](./pic/binsStruct.png)
 
 - bins 的结构：
   - bins 长度为 127 ，前 62 为 small bins，后 64 个为 large bin ，下标 1 的 bin 为 unstored bins。
+
+    <img src="./pic/07.png" alt="bins_size" style="zoom:60%;" />
+
   - 每个 bin 之间，通过等差数列的方式排序，32 位系统前 64 个 small bins 步长为 8，large bin 前 32 步长为 64；64 位系统分别为 16，128。
 
-![bins_size](./pic/07.png)
-![bins_size](./pic/08.png)
+      ![bins_size](./pic/08.png)
 
 #### 内存结构单元 chunk
 
@@ -1098,7 +1110,7 @@ struct malloc_chunk {
      - IS_MMAPPED (M) – 置「1」表示这个 chunk 是通过 mmap 申请的（较大的内存）；
      - NON_MAIN_ARENA (N) – 置「1」表示这个 chunk 属于一个 thread arena。
 
-    ![allocatedchunk](./pic/allocated_chunk.png)
+    <img src="./pic/allocated_chunk.png" alt="allocatedchunk" style="zoom:67%;" />
 
     > malloc_chunk 中的其余结构成员，如 fd、 bk，没有使用的必要而拿来存储用户数据；
     >
@@ -1110,7 +1122,7 @@ struct malloc_chunk {
    - fd: Forward pointer —— 本字段指向同一 bin 中的下个 free chunk（free chunk 链表的前驱指针）；
    - bk: Backward pointer —— 本字段指向同一 bin 中的上个 free chunk（free chunk 链表的后继指针）。
 
-    ![freechunk](./pic/freeChunk.png)
+    <img src="./pic/freeChunk.png" alt="freechunk" style="zoom:67%;" />
 
 #### 特殊 bins 类型
 
@@ -2431,11 +2443,13 @@ __libc_malloc (size_t bytes)
         __atomic_load_n ((mem), __ATOMIC_RELAXED); })
     ```
 
+- 下图为 _int_malloc 前半部分流程图：
+
   ![ptmalloc1](./pic/Glibc_int_malloc-1.png)
 
 #### _int_malloc 之 malloc_consolidate
 
-consolidate 的目的对堆中的碎片 chunk 进行合并整理，减少堆中的碎片。主要将 fastbin 管理的所有 chunk 空闲的进行释放，将其添加到 usorted bin 上。
+consolidate 的目的是对堆中的碎片 chunk 进行合并整理，减少堆中的碎片。主要将 fastbin 管理的所有 chunk 空闲的进行释放，将其添加到 unsorted bin 上。
 
 ```cpp
 /*
@@ -2548,7 +2562,9 @@ static void malloc_consolidate(mstate av) {
 }
 ```
 
-![malloc_consolidate](./pic/malloc_consolidate.png)
+- 下图为 malloc_consolidate 流程图：
+
+<img src="./pic/malloc_consolidate.png" alt="malloc_consolidate" style="zoom:90%;" />
 
 #### _int_malloc 之 large bin
 
@@ -2872,7 +2888,6 @@ static void malloc_consolidate(mstate av) {
     ```
 
 8. binmap 中的每一位表示对应的 bin 中是否存在空闲的 chunk，4 个 block 来管理，每个 block 有 4 字节，也就是 128 个 bit。通过 binmap 机制快速查找所有  large bin 所包含的空闲内存是否有符合标准的。
-    - [参考文章--glibc-malloc 源码分析](https://a1ex.online/2020/09/28/glibc-malloc%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/)
 
     ```cpp
         ////////////////////////////////////////
@@ -3314,9 +3329,8 @@ static void malloc_consolidate(mstate av) {
 4. 非主分配区情况，通过 mmap 申请新的 heap header，放入线程的 heap 链表中进行内存扩展。首先获取当前非主分配区 heap header info：
     - 首先判断是否而可以进行 heap 扩展 `grow_heap`，成功则进行标志位更新；
     - 否则申请新的 heap 使用，`new_heap` 通过 mmap 申请新的 heap 内存；
-    - [参考文章--Glibc 内存管理--ptmalloc2 源代码分析（二十四）](https://blog.csdn.net/iteye_7858/article/details/82070321?utm_medium=distribute.pc_relevant.none-task-blog-2~default~baidujs_title~default-0.base&spm=1001.2101.3001.4242)
     - [**参考文章--glibc+malloc 源码简析（二）**](https://openeuler.org/zh/blog/wangshuo/glibc+malloc%E6%BA%90%E7%A0%81%E7%AE%80%E6%9E%90(%E4%BA%8C).html)
-    - //TODO: 可以详细解析下 sysmalloc 内存对齐相关细节参考上边这篇文章。
+    - 想要详细了解下 sysmalloc 内存对齐相关细节参考上边这篇文章。
 
     ```cpp
     #define heap_for_ptr(ptr) \
@@ -4144,4 +4158,51 @@ static void malloc_consolidate(mstate av) {
     }
     ```
 
+- 下图为 _int_free 流程图:
+
   ![free pic](./pic/Glibc_int_malloc-free.png)
+
+## 参考文章
+
+- [参考文章-Linux 可执行文件如何装载进虚拟内存](https://zhuanlan.zhihu.com/p/148426554)
+- [参考文章-ELF 文件解析（一）：Segment 和 Section](https://www.cnblogs.com/jiqingwu/p/elf_format_research_01.html)
+- [参考文章-Executable and Linkable Format (ELF)](http://www.skyfree.org/linux/references/ELF_Format.pdf)
+- [参考文章-ELF 文件的加载过程](https://blog.csdn.net/gatieme/article/details/51628257#t0)
+- [参考文章-Linux 中 main 是如何执行的](https://www.cnblogs.com/harlanc/p/7774882.html)
+- [参考文章-进程的内存空间布局](https://blog.csdn.net/cztqwan/article/details/80248479)
+- [参考文章-anatomy-of-program-in-memory](https://girdhargopalbansal.blogspot.com/2013/06/anatomy-of-program-in-memory.html)
+- [参考文章-Glibc：浅谈 malloc() 函数具体实现](https://blog.csdn.net/plus_re/article/details/80211488)
+- [参考文章-认真分析 mmap](https://www.cnblogs.com/huxiao-tee/p/4660352.html)
+- [参考文章-系统调用与内存管理](https://blog.csdn.net/apollon_krj/article/details/54565768)
+- [参考文章-strong_alias && weak_alias && __attribute__](https://www.cnblogs.com/justinyo/archive/2013/03/12/2956438.html)
+- [参考文章-why uClibc/glibc use the alias for function name?](https://comp.os.linux.development.system.narkive.com/L4JmkjDb/why-uclibc-glibc-use-the-alias-for-function-name)
+- [参考文章-C++性能榨汁机之分支预测器](https://zhuanlan.zhihu.com/p/36543235)
+- [参考文章-prevent allocs larger than PTRDIFF_MAX on Android](https://github.com/jemalloc/jemalloc/pull/295)
+- [参考文章-What is the maximum size of an array in C?](https://stackoverflow.com/questions/9386979/what-is-the-maximum-size-of-an-array-in-c)
+- [参考文章--Tunable Framework](https://sourceware.org/glibc/wiki/Tunables)
+- [参考文章--ptmalloc 源码分析](https://blog.csdn.net/initphp/article/details/109489720#t1)
+- [参考文章-Wolfram Gloger's malloc homepage](http://www.malloc.de/en/)
+- [参考文章-ptmalloc 源码分析 - 分配器状态机 malloc_state（02）](https://blog.csdn.net/initphp/article/details/109489720)
+- [参考文章-Understanding the glibc malloc binning implementation](https://stackoverflow.com/questions/63600405/understanding-the-glibc-malloc-binning-implementation)
+- [参考文章--glibc 内存管理源码分析](https://github.com/vislee/leevis.com/issues/132)
+- [参考文章-理解 glibc malloc：malloc() 与 free() 原理图解](https://blog.csdn.net/maokelong95/article/details/52006379)
+- [参考文章-Understanding glibc malloc](https://sploitfun.wordpress.com/2015/02/10/understanding-glibc-malloc/comment-page-1/?blogsub=confirming#subscribe-blog%E3%80%82)
+- [参考文章--C 标准库函数 宏定义浅析](https://www.zybuluo.com/yiltoncent/note/87733)
+- [参考文章--堆溢出学习笔记 (linux)](https://my.oschina.net/u/4396372/blog/3913130)
+- [参考文章--glibc2.26--tcache](https://www.cnblogs.com/crybaby/p/13215209.html)
+- [参考文章--堆漏洞挖掘中的 bins 分类](https://blog.csdn.net/qq_41453285/article/details/96865321)
+- [参考文章--Linux 堆内存管理深入分析](https://www.cnblogs.com/alisecurity/p/5520847.html)
+- [参考文章--glibc-malloc 源码分析](https://a1ex.online/2020/09/28/glibc-malloc%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/)
+- [参考文章--浅析 largebin attack](https://xz.aliyun.com/t/5177)
+- [参考文章--largebin 学习从源码到做题](https://xz.aliyun.com/t/6596)
+- [参考文章--堆漏洞挖掘中的 malloc_consolidate 与 FASTBIN_CONSOLIDATION_THRESHOLD](https://dongshao.blog.csdn.net/article/details/97627411)
+- [参考文章--浅析 largebin attack](https://xz.aliyun.com/t/5177)
+- [参考文章--largebin 学习从源码到做题](https://xz.aliyun.com/t/6596)
+- [参考文章--glibc-malloc 源码分析](https://a1ex.online/2020/09/28/glibc-malloc%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90/)
+- [参考文章--申请内存块](https://ctf-wiki.org/pwn/linux/glibc-heap/implementation/malloc/)
+- [参考文章--Glibc 内存管理--ptmalloc2 源代码分析（二十四）](https://blog.csdn.net/iteye_7858/article/details/82070321?utm_medium=distribute.pc_relevant.none-task-blog-2~default~baidujs_title~default-0.base&spm=1001.2101.3001.4242)
+- [参考文章--glibc+malloc 源码简析（二）](https://openeuler.org/zh/blog/wangshuo/glibc+malloc%E6%BA%90%E7%A0%81%E7%AE%80%E6%9E%90(%E4%BA%8C).html)
+- [参考文章--How does LIBC_PROBE macro actually work in Glibc?](https://stackoverflow.com/questions/52219096/how-does-libc-probe-macro-actually-work-in-glibc)
+- [参考文章--heap-exploitation](https://heap-exploitation.dhavalkapil.com/diving_into_glibc_heap/core_functions)
+- [参考文章--heap-9-_int_free 源码及其部分分析](https://kiprey.github.io/2020/05/heap-9-__int_free_source/)
+- [参考文章--linux 堆溢出学习之 malloc 堆管理机制原理详解](https://blog.csdn.net/qq_29343201/article/details/59614863)
