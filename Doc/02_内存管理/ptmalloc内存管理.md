@@ -37,7 +37,7 @@
       - [_int_malloc 之 sysmalloc](#_int_malloc-之-sysmalloc)
   - [free 内存释放](#free-内存释放)
     - [__lib_free](#__lib_free)
-  - [_int_free](#_int_free)
+    - [_int_free](#_int_free)
   - [参考文章](#参考文章)
 
 ## 前言
@@ -3828,7 +3828,7 @@ static void malloc_consolidate(mstate av) {
     }
     ```
 
-## _int_free
+### _int_free
 
 1. 安全检查：
 
