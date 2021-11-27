@@ -44,6 +44,8 @@
 
 本文主要介绍 glibc 默认的内存分配器 Ptmalloc 的相关实现细节，希望可以帮助你建立印象中的内存模型，在问题调试、内存优化中不再过于束手无策。
 
+> Update:2021/11/27
+>
 > 文中使用的 glibc 版本为 [2.33（Released 2021-02-01）](https://www.gnu.org/software/libc/)
 >
 > 由于本人水平有限如有错误以及图片不清晰等问题请即时指出或在 [github 仓库](https://github.com/HATTER-LONG/glibc_Learnging) 提交 issue，谢谢～
